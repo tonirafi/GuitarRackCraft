@@ -38,7 +38,8 @@ object EngineInitHelper {
      */
     fun initEngine(
         context: Context,
-        onExtractionProgress: ((extracted: Int, total: Int) -> Unit)? = null
+        onExtractionProgress: ((extracted: Int, total: Int) -> Unit)? = null,
+        onStatus: ((String) -> Unit)? = null
     ): Boolean {
         val engine = NativeEngine.getInstance()
         val lv2Dir = File(context.applicationContext.filesDir, "lv2")
@@ -50,7 +51,7 @@ object EngineInitHelper {
 
         // For playstore flavor: extract plugin .so from PAD packs before init
         if (BuildConfig.USE_ASSET_PACKS) {
-            PluginAssetExtractor.ensurePluginsExtracted(context, onExtractionProgress)
+            PluginAssetExtractor.ensurePluginsExtracted(context, onExtractionProgress, onStatus)
             val pluginDir = PluginAssetExtractor.getPluginDir(context)
             engine.nativeSetPluginLibDir(pluginDir.absolutePath)
             Log.d(TAG, "Plugin lib dir (PAD): ${pluginDir.absolutePath}")

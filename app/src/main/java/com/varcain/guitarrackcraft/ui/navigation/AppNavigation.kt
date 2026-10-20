@@ -32,8 +32,12 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.ui.platform.LocalContext
+import com.varcain.guitarrackcraft.ui.aitone.AiToneScreen
+import com.varcain.guitarrackcraft.ui.tab.GuitarTabScreen
 import com.varcain.guitarrackcraft.ui.browser.PluginBrowserScreen
 import com.varcain.guitarrackcraft.ui.modgui.ModguiScreen
+import com.varcain.guitarrackcraft.ui.rack.PresetScreen
 import com.varcain.guitarrackcraft.ui.rack.RackScreen
 import com.varcain.guitarrackcraft.ui.vst.VST_MANAGER_ROUTE
 import com.varcain.guitarrackcraft.ui.vst.vstManagerRoute
@@ -51,6 +55,15 @@ sealed class Screen(val route: String) {
     }
     object Modgui : Screen("modgui/{pluginIndex}?w={w}&h={h}") {
         fun route(pluginIndex: Int, w: Int = 0, h: Int = 0) = "modgui/$pluginIndex?w=$w&h=$h"
+    }
+    object Presets : Screen("presets")
+    object GuitarTab : Screen("guitar_tab?preset={preset}") {
+        fun route(preset: String): String = "guitar_tab?preset=${android.net.Uri.encode(preset)}"
+    }
+    object AiTone : Screen("ai_tone?mode={mode}&query={query}") {
+        fun route(mode: String = "", query: String = ""): String {
+            return "ai_tone?mode=$mode&query=${android.net.Uri.encode(query)}"
+        }
     }
     object Settings : Screen("settings")
     object Recordings : Screen("recordings")
@@ -89,6 +102,7 @@ fun AppNavigation(
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
     val rackViewModel: RackViewModel = viewModel()
+    val context = LocalContext.current
 
     Box(modifier = Modifier.fillMaxSize()) {
         // RackScreen is ALWAYS composed — kept alive so X11/modgui UIs don't re-render.
@@ -102,6 +116,16 @@ fun AppNavigation(
                 navController.navigate(Screen.Tone3000.route(tag, gear, platform, sourcePluginIndex, sourceSlot))
             },
             onNavigateToVstManager = { navController.navigate(VST_MANAGER_ROUTE) },
+            onNavigateToAiTone = { mode, query ->
+                navController.navigate(Screen.AiTone.route(mode, query))
+            },
+            onNavigateToPresets = {
+                navController.navigate(Screen.Presets.route)
+            },
+            onNavigateToTab = { preset ->
+                rackViewModel.loadPreset(context, preset)
+                navController.navigate(Screen.GuitarTab.route(preset))
+            },
             onReplacePlugin = { replaceIndex ->
                 navController.navigate(Screen.Browser.route(replaceIndex))
             },
@@ -150,6 +174,60 @@ fun AppNavigation(
                 PluginBrowserScreen(
                     replaceIndex = replaceIndex,
                     onNavigateBack = { navController.popBackStack() }
+                )
+            }
+            composable(
+                route = Screen.AiTone.route,
+                arguments = listOf(
+                    navArgument("mode") { type = NavType.StringType; defaultValue = "" },
+                    navArgument("query") { type = NavType.StringType; defaultValue = "" }
+                )
+            ) { entry ->
+                val context = LocalContext.current
+                val mode = entry.arguments?.getString("mode").orEmpty()
+                val query = entry.arguments?.getString("query").orEmpty()
+                AiToneScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onRackChanged = { rackViewModel.refreshRackAfterExternalEdit() },
+                    onSaveRackPreset = { name -> rackViewModel.savePreset(context, name) },
+                    startMode = mode,
+                    startQuery = query
+                )
+            }
+            composable(
+                route = Screen.GuitarTab.route,
+                arguments = listOf(
+                    navArgument("preset") { type = NavType.StringType; defaultValue = "" }
+                )
+            ) { entry ->
+                GuitarTabScreen(
+                    presetName = entry.arguments?.getString("preset").orEmpty(),
+                    onNavigateBack = { navController.popBackStack() },
+                    onPlayed = { title ->
+                        rackViewModel.noteEngineRunning()
+                        rackViewModel.adoptExternalWav(title)
+                        navController.popBackStack()
+                    }
+                )
+            }
+            composable(Screen.Presets.route) {
+                PresetScreen(
+                    viewModel = rackViewModel,
+                    onNavigateBack = { navController.popBackStack() },
+                    onAddTone = { mode, query ->
+                        navController.popBackStack()
+                        navController.navigate(Screen.AiTone.route(mode, query))
+                    },
+                    onPlayTab = { preset ->
+                        rackViewModel.loadPreset(context, preset)
+                        navController.popBackStack()
+                        navController.navigate(Screen.GuitarTab.route(preset))
+                    },
+                    onTabPlayed = { title ->
+                        rackViewModel.noteEngineRunning()
+                        rackViewModel.adoptExternalWav(title)
+                        navController.popBackStack()
+                    }
                 )
             }
             composable(Screen.Settings.route) {

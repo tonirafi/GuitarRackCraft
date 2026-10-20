@@ -76,3 +76,6 @@ grc_plugin(fatfrog        PACK brummer AUTHOR brummer10   BUNDLES FatFrog)
 
 # Our own
 grc_plugin(doubletracker  PACK gx      AUTHOR Varcain     BUNDLES doubletracker)
+
+# Classic MDA effects and instruments (one .so per plugin, shared bundle)
+grc_plugin(mda            PACK gx      AUTHOR MDA         BUNDLES mda)

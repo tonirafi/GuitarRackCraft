@@ -52,6 +52,12 @@ Local modifications are stored as numbered patch files in `patches/<submodule>/`
 | **XTinyTerror** | Amp simulation |
 | **ModularAmpToolKit.lv2** | PreAmps, PowerAmps, impulse modules |
 
+## LV2 Plugins - MDA
+
+| Submodule | Description |
+|-----------|-------------|
+| **mda-lv2** | 36 classic MDA effects and instruments (delay, reverb, piano, synth, vocoder) |
+
 ## LV2 Plugins - Varcain
 
 | Submodule | Description |

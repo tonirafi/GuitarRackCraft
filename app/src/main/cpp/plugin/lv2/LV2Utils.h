@@ -19,7 +19,9 @@
 
 #pragma once
 
+#include "../IPlugin.h"
 #include <string>
+#include <vector>
 
 #if defined(HAVE_LV2) && HAVE_LV2 == 1
 #include <lilv/lilv.h>
@@ -38,6 +40,9 @@ std::string resolveX11UIBinaryPath(const LilvUI* ui, const LilvPlugin* plugin, L
  *  Returns true if modgui was found and info fields were populated. */
 struct PluginInfo;
 bool discoverModguiMetadata(const LilvPlugin* plugin, PluginInfo& info);
+
+/** Read control and audio port metadata from the plugin TTL via lilv. Does not load the DSP binary. */
+void readLv2PortMetadata(LilvWorld* world, const LilvPlugin* plugin, std::vector<PortInfo>& ports);
 
 #endif
 

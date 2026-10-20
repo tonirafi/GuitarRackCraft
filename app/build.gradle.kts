@@ -48,9 +48,9 @@ android {
     ndkVersion = toolchain.getProperty("ndk.version")
 
     defaultConfig {
-        applicationId = "com.varcain.guitarrackcraft"
+        applicationId = "com.gdt.nadarak"
         minSdk = libs.versions.minSdk.get().toInt()
-        targetSdk = 35
+        targetSdk = 36
         // Releases set these with -PgrcVersionCode / -PgrcVersionName (CI:
         // build-deploy.yml); a local device install can pass a higher code the
         // same way. The fallbacks are the development defaults.
@@ -135,10 +135,10 @@ android {
         }
         create("playstore") {
             dimension = "distribution"
-            // Play Store eligible (current floor: targetSdk=35 as of
-            // Aug 2025). No :vsthost_lib dependency, no wine, "Manage VST"
-            // overflow entry hidden via BuildConfig.HAS_VST_HOST=false.
-            targetSdk = 35
+            // New Play apps must target API 36 (31 Aug 2026). No
+            // :vsthost_lib dependency, no wine, "Manage VST" overflow entry
+            // hidden via BuildConfig.HAS_VST_HOST=false.
+            targetSdk = 36
             buildConfigField("boolean", "USE_ASSET_PACKS", "true")
             buildConfigField("boolean", "HAS_VST_HOST",   "false")
         }
@@ -304,6 +304,10 @@ dependencies {
     // Networking & JSON
     implementation(libs.okhttp)
     implementation(libs.gson)
+
+    // Play Asset Delivery: plugin packs are fast-follow, so they are not in
+    // the base AssetManager at install.
+    implementation("com.google.android.play:asset-delivery:2.2.2")
 
     // Image loading
     implementation(libs.coil.compose)

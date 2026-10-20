@@ -465,6 +465,7 @@ class NativeEngine private constructor() {
     }
 
     fun addPluginToRack(pluginId: String, position: Int = -1): Int {
+        PluginAssetExtractor.awaitDspPreload()
         return nativeAddPluginToRack(pluginId, position)
     }
 

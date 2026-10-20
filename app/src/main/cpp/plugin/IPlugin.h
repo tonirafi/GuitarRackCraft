@@ -79,11 +79,14 @@ struct PortInfo {
     bool isAudio;
     bool isControl;
     bool isToggle;
+    bool isInteger = false;
     float defaultValue;
     float minValue;
     float maxValue;
     /** Enumeration values for this port; empty for continuous ports. */
     std::vector<ScalePoint> scalePoints;
+    /** Unit label from units:unit, such as "db" or "hz". Empty if the plugin declares none. */
+    std::string unit;
 };
 
 struct PluginInfo {

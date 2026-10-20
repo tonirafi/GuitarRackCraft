@@ -24,6 +24,6 @@ plugins {
 assetPack {
     packName.set("neural_pack")
     dynamicDelivery {
-        deliveryType.set("install-time")
+        deliveryType.set("fast-follow")
     }
 }

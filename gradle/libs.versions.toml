@@ -7,7 +7,7 @@ agp = "8.7.3"
 kotlin = "1.9.20"
 # The Compose compiler that matches this Kotlin version.
 composeCompiler = "1.5.4"
-compileSdk = "35"
+compileSdk = "36"
 minSdk = "26"
 # The SDK's CMake, which builds the modules' C++ (the native prebuild uses the host's).
 cmake = "3.22.1"

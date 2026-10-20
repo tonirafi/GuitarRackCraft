@@ -113,9 +113,7 @@ bool LV2PluginFactory::initialize() {
         }
         info.format = "LV2";
 
-        // Get port count for info
-        uint32_t numPorts = lilv_plugin_get_num_ports(plugin);
-        info.ports.reserve(numPorts);
+        readLv2PortMetadata(world_, plugin, info.ports);
 
         // Discover modgui (modgui.ttl + iconTemplate)
         discoverModgui(plugin, info);
@@ -373,52 +371,70 @@ void LV2PluginFactory::rewriteManifestPaths(const std::string& basePath) {
             }
             fclose(f);
 
-            // Find lv2:binary <soname.so> and replace with absolute path
-            size_t binaryPos = content.find("lv2:binary");
-            if (binaryPos == std::string::npos) continue;
-
-            size_t lt = content.find('<', binaryPos);
-            size_t gt = content.find('>', lt != std::string::npos ? lt : 0);
-            if (lt == std::string::npos || gt == std::string::npos) continue;
-
-            std::string binaryUri = content.substr(lt + 1, gt - lt - 1);
-            size_t lastSlash = binaryUri.rfind('/');
-            std::string soName = (lastSlash != std::string::npos)
-                ? binaryUri.substr(lastSlash + 1) : binaryUri;
-
-            if (soName.size() <= 3 || soName.substr(soName.size() - 3) != ".so") continue;
-
-            std::string nativeLibPath = nativeLibDir_ + "/lib" + soName;
-            std::string pluginLibPath = pluginLibDir_.empty() ? std::string() : (pluginLibDir_ + "/lib" + soName);
-            std::string bundleSoPath = fullPath + "/" + soName;
-
-            // Resolve which path to use for lv2:binary.
-            // Search order: nativeLibDir (full flavor) → pluginLibDir (PAD extraction) → bundle fallback
-            std::string binaryUriValue;
-            bool haveInLibDir = (access(nativeLibPath.c_str(), F_OK) == 0);
-            bool haveInPluginDir = (!pluginLibPath.empty() && access(pluginLibPath.c_str(), F_OK) == 0);
-            bool haveInBundle = (access(bundleSoPath.c_str(), F_OK) == 0);
-
-            if (haveInLibDir) {
-                binaryUriValue = "file://" + nativeLibPath;
-            } else if (haveInPluginDir) {
-                binaryUriValue = "file://" + pluginLibPath;
-            } else if (haveInBundle) {
-                binaryUriValue = "file://" + bundleSoPath;
-            } else {
-                missingCount++;
-                continue;
-            }
-
-            // Replace ALL occurrences of <soname.so> (multi-plugin bundles share the same binary)
-            std::string oldToken = "<" + binaryUri + ">";
-            std::string newToken = "<" + binaryUriValue + ">";
+            // Rewrite every lv2:binary. One bundle may hold several plugins,
+            // each with its own .so (MDA) or the same shared binary (Guitarix).
             std::string newContent = content;
-            size_t pos = 0;
-            while ((pos = newContent.find(oldToken, pos)) != std::string::npos) {
-                newContent.replace(pos, oldToken.size(), newToken);
-                pos += newToken.size();
+            size_t searchFrom = 0;
+            bool rewroteBinary = false;
+            while (true) {
+                size_t binaryPos = newContent.find("lv2:binary", searchFrom);
+                if (binaryPos == std::string::npos) break;
+
+                size_t lt = newContent.find('<', binaryPos);
+                size_t gt = newContent.find('>', lt != std::string::npos ? lt : 0);
+                if (lt == std::string::npos || gt == std::string::npos || lt > binaryPos + 64) {
+                    searchFrom = binaryPos + 10;
+                    continue;
+                }
+
+                std::string binaryUri = newContent.substr(lt + 1, gt - lt - 1);
+                if (binaryUri.rfind("file://", 0) == 0) {
+                    searchFrom = gt + 1;
+                    continue;
+                }
+
+                size_t lastSlash = binaryUri.rfind('/');
+                std::string soName = (lastSlash != std::string::npos)
+                    ? binaryUri.substr(lastSlash + 1) : binaryUri;
+
+                if (soName.size() <= 3 || soName.substr(soName.size() - 3) != ".so") {
+                    searchFrom = gt + 1;
+                    continue;
+                }
+
+                std::string nativeLibPath = nativeLibDir_ + "/lib" + soName;
+                std::string pluginLibPath = pluginLibDir_.empty() ? std::string() : (pluginLibDir_ + "/lib" + soName);
+                std::string bundleSoPath = fullPath + "/" + soName;
+
+                // Search order: nativeLibDir (full flavor) → pluginLibDir (PAD) → bundle
+                std::string binaryUriValue;
+                bool haveInLibDir = (access(nativeLibPath.c_str(), F_OK) == 0);
+                bool haveInPluginDir = (!pluginLibPath.empty() && access(pluginLibPath.c_str(), F_OK) == 0);
+                bool haveInBundle = (access(bundleSoPath.c_str(), F_OK) == 0);
+
+                if (haveInLibDir) {
+                    binaryUriValue = "file://" + nativeLibPath;
+                } else if (haveInPluginDir) {
+                    binaryUriValue = "file://" + pluginLibPath;
+                } else if (haveInBundle) {
+                    binaryUriValue = "file://" + bundleSoPath;
+                } else {
+                    missingCount++;
+                    searchFrom = gt + 1;
+                    continue;
+                }
+
+                std::string oldToken = "<" + binaryUri + ">";
+                std::string newToken = "<" + binaryUriValue + ">";
+                size_t pos = 0;
+                while ((pos = newContent.find(oldToken, pos)) != std::string::npos) {
+                    newContent.replace(pos, oldToken.size(), newToken);
+                    pos += newToken.size();
+                }
+                rewroteBinary = true;
+                searchFrom = binaryPos + 10;
             }
+            if (!rewroteBinary) continue;
 
             // Write back
             FILE* fw = fopen(manifestPath.c_str(), "w");

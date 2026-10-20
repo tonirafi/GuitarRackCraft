@@ -123,7 +123,7 @@ static bool ensureJniCache(JNIEnv* env) {
     g_jni.portInfoClass = cache("com/varcain/guitarrackcraft/engine/PortInfo");
     if (!g_jni.portInfoClass) return false;
     g_jni.portInfoCtor = env->GetMethodID(g_jni.portInfoClass, "<init>",
-        "(ILjava/lang/String;Ljava/lang/String;ZZZZFFFLjava/util/List;)V");
+        "(ILjava/lang/String;Ljava/lang/String;ZZZZFFFLjava/util/List;ZLjava/lang/String;)V");
 
     g_jni.pluginInfoClass = cache("com/varcain/guitarrackcraft/engine/PluginInfo");
     if (!g_jni.pluginInfoClass) return false;
@@ -530,6 +530,7 @@ jobject createPortInfoObject(JNIEnv* env, const PortInfo& port) {
 
     jstring nameStr = env->NewStringUTF(port.name.c_str());
     jstring symbolStr = env->NewStringUTF(port.symbol.c_str());
+    jstring unitStr = env->NewStringUTF(port.unit.c_str());
 
     jobject portObj = env->NewObject(g_jni.portInfoClass, g_jni.portInfoCtor,
         static_cast<jint>(port.index),
@@ -542,11 +543,14 @@ jobject createPortInfoObject(JNIEnv* env, const PortInfo& port) {
         static_cast<jfloat>(port.defaultValue),
         static_cast<jfloat>(port.minValue),
         static_cast<jfloat>(port.maxValue),
-        scalePointsList
+        scalePointsList,
+        static_cast<jboolean>(port.isInteger ? JNI_TRUE : JNI_FALSE),
+        unitStr
     );
 
     env->DeleteLocalRef(nameStr);
     env->DeleteLocalRef(symbolStr);
+    if (unitStr) env->DeleteLocalRef(unitStr);
     if (scalePointsList) env->DeleteLocalRef(scalePointsList);
 
     return portObj;

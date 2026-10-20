@@ -60,6 +60,7 @@ class MainActivity : ComponentActivity() {
     private var engineReady by mutableStateOf(false)
     private var extractedCount by mutableIntStateOf(0)
     private var extractTotalCount by mutableIntStateOf(0)
+    private var initStatus by mutableStateOf("Menyiapkan NadaRak")
 
     override fun onNewIntent(intent: android.content.Intent?) {
         super.onNewIntent(intent)
@@ -130,7 +131,8 @@ class MainActivity : ComponentActivity() {
                     } else {
                         PluginExtractScreen(
                             extracted = extractedCount.takeIf { extractTotalCount > 0 },
-                            total = extractTotalCount.takeIf { extractTotalCount > 0 }
+                            total = extractTotalCount.takeIf { extractTotalCount > 0 },
+                            status = initStatus
                         )
                     }
                 }
@@ -154,20 +156,29 @@ class MainActivity : ComponentActivity() {
             } catch (_: Exception) { null }
 
             if (fileList != null) {
+                val stamp = File(lv2Dir, ".extracted")
+                val stampValue = "${BuildConfig.VERSION_CODE}:${fileList.size}"
+                if (stamp.isFile && stamp.readText() == stampValue && (lv2Dir.list()?.size ?: 0) > 1) {
+                    android.util.Log.d("MainActivity", "LV2 assets already extracted ($stampValue)")
+                    return
+                }
+                initStatus = "Menyalin definisi plugin"
                 android.util.Log.d("MainActivity", "Extracting ${fileList.size} LV2 asset files from lv2_files.txt")
                 for (relPath in fileList) {
                     val outputFile = File(lv2Dir, relPath)
+                    if (outputFile.isFile && outputFile.length() > 0L) continue
                     outputFile.parentFile?.mkdirs()
                     try {
                         assets.open("lv2/$relPath").use { input ->
                             FileOutputStream(outputFile).use { output ->
-                                input.copyTo(output)
+                                input.copyTo(output, 1024 * 1024)
                             }
                         }
                     } catch (e: Exception) {
                         android.util.Log.w("MainActivity", "Failed to extract lv2/$relPath: ${e.message}")
                     }
                 }
+                stamp.writeText(stampValue)
             } else {
                 // Fallback: enumerate via assets.list() (full variant / no manifest)
                 val bundleNames = assets.list("lv2")?.toList() ?: emptyList()
@@ -238,10 +249,14 @@ class MainActivity : ComponentActivity() {
 
     private fun prepareLv2AndInitEngine() {
         extractLV2Assets()
-        EngineInitHelper.initEngine(this) { extracted, total ->
-            extractedCount = extracted
-            extractTotalCount = total
-        }
+        EngineInitHelper.initEngine(
+            this,
+            onExtractionProgress = { extracted, total ->
+                extractedCount = extracted
+                extractTotalCount = total
+            },
+            onStatus = { initStatus = it }
+        )
     }
 
     override fun onResume() {

@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.zIndex
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.ExpandLess
@@ -75,7 +76,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.LocalView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -239,6 +242,9 @@ fun RackScreen(
     onNavigateToRecordings: () -> Unit = {},
     onNavigateToTone3000: (String?, String?, String?, Int, String?) -> Unit = { _, _, _, _, _ -> },
     onNavigateToVstManager: () -> Unit = {},
+    onNavigateToAiTone: (mode: String, query: String) -> Unit = { _, _ -> },
+    onNavigateToTab: (preset: String) -> Unit = {},
+    onNavigateToPresets: () -> Unit = {},
     onReplacePlugin: (Int) -> Unit = {},
     viewModel: RackViewModel = viewModel()
 ) {
@@ -353,7 +359,6 @@ fun RackScreen(
         }
     }
 
-    var showPresetSheet by rememberSaveable { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(presetMessage) {
@@ -648,10 +653,7 @@ fun RackScreen(
                         if (isEngineRunning) viewModel.stopEngine() else viewModel.restartEngine(context)
                     },
                     onAddPlugin = onNavigateToBrowser,
-                    onOpenPresets = {
-                        viewModel.refreshPresets(context)
-                        showPresetSheet = true
-                    },
+                    onOpenPresets = onNavigateToPresets,
                     isRecording = isRecording,
                     recordingDurationSec = recordingDurationSec,
                     onToggleRecording = { viewModel.toggleRecording(context) },
@@ -660,14 +662,6 @@ fun RackScreen(
             }
             }
         ) { padding ->
-
-    // Preset bottom sheet
-    if (showPresetSheet) {
-        PresetBottomSheet(
-            viewModel = viewModel,
-            onDismiss = { showPresetSheet = false }
-        )
-    }
 
     // WAV load dialog
     var showRecordingPicker by remember { mutableStateOf(false) }
@@ -3289,78 +3283,112 @@ private fun formatWavTime(sec: Double): String {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PresetBottomSheet(
+fun PresetScreen(
     viewModel: RackViewModel,
-    onDismiss: () -> Unit
+    onNavigateBack: () -> Unit,
+    onAddTone: (mode: String, query: String) -> Unit,
+    onPlayTab: (preset: String) -> Unit,
+    onTabPlayed: (String) -> Unit
 ) {
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val tabStore = remember { com.varcain.guitarrackcraft.tab.SavedGuitarTabStore(java.io.File(context.filesDir, "guitar_tabs")) }
     val presetList by viewModel.presetList.collectAsState()
-    val recentPresets by viewModel.recentPresets.collectAsState()
+    var savedTabs by remember { mutableStateOf(tabStore.list()) }
+    var query by remember { mutableStateOf("") }
     var showSaveDialog by remember { mutableStateOf(false) }
+    var copiedPreset by remember { mutableStateOf<String?>(null) }
+    var tabMessage by remember { mutableStateOf<String?>(null) }
+    var playingTab by remember { mutableStateOf(false) }
+    val needle = query.trim()
+    val shownPresets = presetList.filter { needle.isBlank() || it.contains(needle, ignoreCase = true) }
+    val shownTabs = savedTabs.filter {
+        needle.isBlank() || it.title.contains(needle, ignoreCase = true) || it.presetName.contains(needle, ignoreCase = true)
+    }
+    LaunchedEffect(Unit) {
+        viewModel.refreshPresets(context)
+        savedTabs = tabStore.list()
+    }
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Preset") },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Kembali")
+                    }
+                }
+            )
+        }
+    ) { padding ->
         Column(
             modifier = Modifier
-                .fillMaxWidth()
+                .fillMaxSize()
+                .padding(padding)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 24.dp)
         ) {
-            // Recently used section
-            if (recentPresets.isNotEmpty()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Recently Used", style = MaterialTheme.typography.titleSmall)
-                    TextButton(onClick = {
-                        viewModel.clearRecentPresets(context)
-                    }) {
-                        Text("Clear")
-                    }
-                }
-                recentPresets.forEach { name ->
-                    PresetListItem(
-                        name = name,
-                        onLoad = {
-                            viewModel.loadPreset(context, name)
-                            onDismiss()
-                        },
-                        onShare = {
-                            val json = viewModel.getPresetJson(context, name)
-                            if (json != null) {
-                                val intent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "text/plain"
-                                    putExtra(Intent.EXTRA_TEXT, json)
-                                    putExtra(Intent.EXTRA_SUBJECT, "$name.json")
-                                }
-                                context.startActivity(Intent.createChooser(intent, "Share preset"))
-                            }
-                        },
-                        showDelete = false
-                    )
-                }
-                Divider(modifier = Modifier.padding(vertical = 8.dp))
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Cari preset atau tab") },
+                singleLine = true
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = { onAddTone("", "") },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.size(6.dp))
+                Text("Tambah")
             }
-
-            // All presets section
-            Text("All Presets", style = MaterialTheme.typography.titleSmall)
+            copiedPreset?.let { name ->
+                Text(
+                    "Prompt untuk \"$name\" disalin.",
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            tabMessage?.let { message ->
+                Text(message, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+            }
+            if (playingTab) {
+                CircularProgressIndicator()
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("Preset", style = MaterialTheme.typography.titleSmall)
             if (presetList.isEmpty()) {
                 Text(
-                    "No saved presets",
+                    "Belum ada preset. Tambah dari lagu atau tempel hasil ChatGPT.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 12.dp)
+                )
+            } else if (shownPresets.isEmpty()) {
+                Text(
+                    "Preset tidak ketemu.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(vertical = 12.dp)
                 )
             } else {
-                presetList.forEach { name ->
+                shownPresets.forEach { name ->
                     PresetListItem(
                         name = name,
                         onLoad = {
                             viewModel.loadPreset(context, name)
-                            onDismiss()
+                            onNavigateBack()
                         },
+                        onCopyPrompt = {
+                            clipboard.setText(AnnotatedString(com.varcain.guitarrackcraft.tab.guitarTabPrompt(name)))
+                            copiedPreset = name
+                        },
+                        onPlayTab = { onPlayTab(name) },
                         onShare = {
                             val json = viewModel.getPresetJson(context, name)
                             if (json != null) {
@@ -3380,12 +3408,55 @@ private fun PresetBottomSheet(
                 }
             }
 
+            Spacer(modifier = Modifier.height(16.dp))
+            Text("Tab tersimpan", style = MaterialTheme.typography.titleSmall)
+            if (shownTabs.isEmpty()) {
+                Text(
+                    if (savedTabs.isEmpty()) "Belum ada tab. Periksa tab dari preset, lalu simpan."
+                    else "Tab tidak ketemu.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 12.dp)
+                )
+            } else {
+                shownTabs.forEach { saved ->
+                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                        Text(saved.title, style = MaterialTheme.typography.bodyMedium)
+                        if (saved.presetName.isNotBlank()) {
+                            Text("Preset ${saved.presetName}", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Row {
+                            TextButton(
+                                onClick = {
+                                    scope.launch {
+                                        playingTab = true
+                                        tabMessage = null
+                                        if (saved.presetName.isNotBlank()) {
+                                            viewModel.loadPresetAwait(context, saved.presetName)
+                                        }
+                                        val tab = tabStore.load(saved.id)
+                                        val error = if (tab == null) "Tab tidak bisa dibaca." else com.varcain.guitarrackcraft.tab.GuitarTabPlayer.play(context, tab)
+                                        playingTab = false
+                                        if (error == null && tab != null) onTabPlayed(tab.title) else tabMessage = error
+                                    }
+                                },
+                                enabled = !playingTab
+                            ) { Text("Mainkan") }
+                            TextButton(onClick = {
+                                tabStore.delete(saved.id)
+                                savedTabs = tabStore.list()
+                            }) { Text("Hapus") }
+                        }
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(12.dp))
-            Button(
+            OutlinedButton(
                 onClick = { showSaveDialog = true },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Save Current Preset")
+                Text("Simpan rack ini")
             }
         }
     }
@@ -3407,27 +3478,40 @@ private fun PresetListItem(
     name: String,
     onLoad: () -> Unit,
     onShare: () -> Unit,
+    onCopyPrompt: (() -> Unit)? = null,
+    onPlayTab: (() -> Unit)? = null,
     onDelete: (() -> Unit)? = null,
     showDelete: Boolean = false
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onLoad)
-            .padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = name,
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.weight(1f)
-        )
-        IconButton(onClick = onShare, modifier = Modifier.size(32.dp)) {
-            Icon(Icons.Default.Share, contentDescription = "Share", modifier = Modifier.size(18.dp))
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onLoad),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = name,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f)
+            )
+            IconButton(onClick = onShare, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.Share, contentDescription = "Share", modifier = Modifier.size(18.dp))
+            }
+            if (showDelete && onDelete != null) {
+                IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.Delete, contentDescription = "Delete", modifier = Modifier.size(18.dp))
+                }
+            }
         }
-        if (showDelete && onDelete != null) {
-            IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.Default.Delete, contentDescription = "Delete", modifier = Modifier.size(18.dp))
+        if (onCopyPrompt != null || onPlayTab != null) {
+            Row {
+                if (onCopyPrompt != null) {
+                    TextButton(onClick = onCopyPrompt) { Text("Salin prompt") }
+                }
+                if (onPlayTab != null) {
+                    TextButton(onClick = onPlayTab) { Text("Mainkan tab") }
+                }
             }
         }
     }
@@ -3444,19 +3528,19 @@ private fun PresetSaveDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Save Preset") },
+        title = { Text("Simpan preset") },
         text = {
             Column {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Preset name") },
+                    label = { Text("Nama preset") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 if (nameExists) {
                     Text(
-                        text = "A preset with this name exists and will be overwritten",
+                        text = "Nama ini sudah ada dan akan ditimpa",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(top = 4.dp)
@@ -3469,11 +3553,11 @@ private fun PresetSaveDialog(
                 onClick = { onSave(name.trim()) },
                 enabled = name.isNotBlank()
             ) {
-                Text(if (nameExists) "Overwrite" else "Save")
+                Text(if (nameExists) "Timpa" else "Simpan")
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text("Batal") }
         }
     )
 }

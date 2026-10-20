@@ -24,6 +24,8 @@ plugins {
 assetPack {
     packName.set("gxplugins_pack")
     dynamicDelivery {
-        deliveryType.set("install-time")
+        // Fast-follow, not install-time: install-time packs are split APKs
+        // with no <uses-sdk>, and Play reads their target SDK as 1.
+        deliveryType.set("fast-follow")
     }
 }

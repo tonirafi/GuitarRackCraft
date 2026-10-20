@@ -41,7 +41,11 @@ data class PortInfo(
     val defaultValue: Float = 0.0f,
     val minValue: Float = 0.0f,
     val maxValue: Float = 1.0f,
-    val scalePoints: List<ScalePoint> = emptyList()
+    val scalePoints: List<ScalePoint> = emptyList(),
+    /** True when the TTL marks the port lv2:integer. */
+    val isInteger: Boolean = false,
+    /** Unit fragment from units:unit, empty when the plugin declares none. */
+    val unit: String = ""
 )
 
 /**

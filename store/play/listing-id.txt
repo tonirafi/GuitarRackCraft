@@ -1,0 +1,41 @@
+NadaRak — teks Play Store (Bahasa Indonesia)
+Judul, deskripsi, ikon, dan feature graphic sudah diunggah ke Play Console.
+AAB belum masuk track: API menolak commit karena paket aset.
+
+Paket Play Store
+com.gdt.nadarak
+
+Judul (maks. 30)
+NadaRak: Efek Gitar
+
+Deskripsi singkat (maks. 80)
+Rantai efek gitar, preset, dan tab latihan di satu aplikasi.
+
+Deskripsi lengkap
+NadaRak menyusun efek gitar di ponsel: amplifier, distorsi, equalizer, delay, reverb, dan plugin lain yang terpasang di perangkat.
+
+Yang bisa dilakukan
+• Susun rantai efek dan simpan sebagai preset
+• Tambah nada dengan menempel hasil ChatGPT, lalu pasang sekali ke rack
+• Cari preset dan tab yang sudah disimpan
+• Minta tab latihan ke ChatGPT, simpan, lalu mainkan lewat efek yang sedang terpasang
+• Rekam permainan
+
+Nada dan tab dari ChatGPT adalah perkiraan latihan. Bukan setelan studio asli dan bukan tab resmi sebuah lagu.
+
+Aplikasi ini perangkat lunak bebas di bawah GPL-3.0.
+
+Kategori
+Musik dan audio
+
+Grafis yang sudah disiapkan
+• Ikon Play Store 512×512: store/play/icon-512.png
+• Feature graphic 1024×500: store/play/feature-1024x500.png
+• Nama di launcher: NadaRak
+
+Kebijakan privasi
+https://gutekno.com/kebijakan-privasi-nadarak
+
+Masih perlu sebelum unggah
+• Minimal 2 screenshot ponsel (bukan mockup)
+• Isi Data safety di Play Console sesuai akses mikrofon, penyimpanan, dan jaringan

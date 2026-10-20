@@ -291,6 +291,18 @@ class RackViewModel(application: Application) : AndroidViewModel(application) {
         updateRackState(forceNewInstanceIds)
     }
 
+    fun noteEngineRunning() {
+        _isEngineRunning.value = AudioEngine.isRunning()
+    }
+
+    fun adoptExternalWav(fileName: String) {
+        _wavLoaded.value = WavPlayer.isLoaded()
+        _wavDurationSec.value = WavPlayer.getDurationSec()
+        _wavPositionSec.value = WavPlayer.getPositionSec()
+        _isWavPlaying.value = WavPlayer.isPlaying()
+        _loadedFileName.value = fileName
+    }
+
     fun loadWav(path: String, fileName: String? = null) {
         viewModelScope.launch {
             try {
@@ -494,33 +506,37 @@ class RackViewModel(application: Application) : AndroidViewModel(application) {
 
     fun loadPreset(ctx: Context, name: String) {
         viewModelScope.launch {
-            val engine = NativeEngine.getInstance()
-            val ok = try {
-                withBlockingOperation("Loading preset") {
-                    val loaded = withContext(Dispatchers.IO) {
-                        engine.setChainBypass(true)
-                        try {
-                            presetManager.loadPreset(ctx, name)
-                        } finally {
-                            engine.setChainBypass(false)
-                        }
-                    }
-                    if (loaded) {
-                        ensureRecentManager(ctx).addRecent(name)
-                        refreshPresets(ctx)
-                        updateRackStateNow(forceNewInstanceIds = true)
-                    }
-                    loaded
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("AudioLifecycle", "loadPreset failed: ${e.message}", e)
-                false
-            }
+            val ok = loadPresetAwait(ctx, name)
             if (ok) {
                 _presetMessage.value = "Preset '$name' loaded"
             } else {
                 _presetMessage.value = "Failed to load preset (plugin count mismatch?)"
             }
+        }
+    }
+
+    suspend fun loadPresetAwait(ctx: Context, name: String): Boolean {
+        val engine = NativeEngine.getInstance()
+        return try {
+            withBlockingOperation("Loading preset") {
+                val loaded = withContext(Dispatchers.IO) {
+                    engine.setChainBypass(true)
+                    try {
+                        presetManager.loadPreset(ctx, name)
+                    } finally {
+                        engine.setChainBypass(false)
+                    }
+                }
+                if (loaded) {
+                    ensureRecentManager(ctx).addRecent(name)
+                    refreshPresets(ctx)
+                    updateRackStateNow(forceNewInstanceIds = true)
+                }
+                loaded
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("AudioLifecycle", "loadPreset failed: ${e.message}", e)
+            false
         }
     }
 
@@ -578,6 +594,13 @@ class RackViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearPresetMessage() {
         _presetMessage.value = null
+    }
+
+    /** Reloads the rack list after another screen changes the native chain. */
+    fun refreshRackAfterExternalEdit() {
+        viewModelScope.launch {
+            updateRackStateNow(forceNewInstanceIds = true)
+        }
     }
 
     override fun onCleared() {

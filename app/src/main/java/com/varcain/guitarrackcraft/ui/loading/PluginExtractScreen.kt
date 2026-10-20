@@ -46,7 +46,8 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun PluginExtractScreen(
     extracted: Int?,
-    total: Int?
+    total: Int?,
+    status: String = "Menyiapkan NadaRak"
 ) {
     Box(
         modifier = Modifier
@@ -60,7 +61,7 @@ fun PluginExtractScreen(
             modifier = Modifier.padding(horizontal = 48.dp)
         ) {
             Text(
-                text = "Guitar RackCraft",
+                text = "NadaRak",
                 style = MaterialTheme.typography.headlineMedium,
                 color = MaterialTheme.colorScheme.primary
             )
@@ -69,7 +70,7 @@ fun PluginExtractScreen(
 
             if (extracted != null && total != null && total > 0) {
                 Text(
-                    text = "Preparing plugins ($extracted / $total)",
+                    text = "Menyalin plugin ($extracted / $total)",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onBackground
                 )
@@ -80,7 +81,7 @@ fun PluginExtractScreen(
                 )
             } else {
                 Text(
-                    text = "Initializing...",
+                    text = status,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onBackground
                 )

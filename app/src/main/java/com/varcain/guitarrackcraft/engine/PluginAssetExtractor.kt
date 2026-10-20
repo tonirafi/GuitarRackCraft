@@ -21,15 +21,21 @@ package com.varcain.guitarrackcraft.engine
 
 import android.content.Context
 import android.util.Log
+import com.google.android.gms.tasks.Tasks
+import com.google.android.play.core.assetpacks.AssetPackManagerFactory
+import com.google.android.play.core.assetpacks.model.AssetPackStatus
 import java.io.File
+import java.io.InputStream
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Extracts plugin .so files from Play Asset Delivery install-time packs to a
+ * Extracts plugin .so files from Play Asset Delivery fast-follow packs to a
  * dlopen-able directory on first launch (or after app update).
  *
- * Install-time PAD packs are merged into the app's asset manager, so their
- * contents are accessible via context.assets.  Plugin .so files are stored
- * under "plugins/arm64-v8a/" in each pack.
+ * Fast-follow packs are not split APKs (install-time packs are, and Play then
+ * reads their missing targetSdk as 1). After the pack download finishes, files
+ * are read from the pack location. A copy that is already in the base
+ * AssetManager is used first. Plugin .so files live under "plugins/arm64-v8a/".
  *
  * A build-time manifest (plugin_libs.txt) lists all plugin .so filenames so
  * extraction does not depend on assets.list() (which is unreliable across
@@ -44,6 +50,12 @@ object PluginAssetExtractor {
     private const val PLUGINS_ASSET_DIR = "plugins/arm64-v8a"
     private const val MANIFEST_FILE = "plugin_libs.txt"
     private const val VERSION_STAMP_FILE = ".version_code"
+    private val PACK_NAMES = listOf("gxplugins_pack", "neural_pack", "brummer_pack")
+    private const val PACK_WAIT_MS = 15 * 60 * 1000L
+    private const val COPY_BUFFER = 1024 * 1024
+    private val preloadLock = Object()
+    private val preloadFinished = AtomicBoolean(false)
+    @Volatile private var preloadRunning = false
 
     /**
      * Directory where extracted plugin .so files are stored.
@@ -83,14 +95,15 @@ object PluginAssetExtractor {
     }
 
     /**
-     * Ensure plugins are extracted.  Skips extraction if already done for the
-     * current version code, but always pre-loads DSP .so via System.load().
+     * Ensure plugins are extracted. Skips the copy when this version is already
+     * on disk. DSP System.load runs in the background so the first screen can open.
      * @param onProgress optional callback: (extracted, total) counts
      * @return true if extraction completed (or was already up to date)
      */
     fun ensurePluginsExtracted(
         context: Context,
-        onProgress: ((extracted: Int, total: Int) -> Unit)? = null
+        onProgress: ((extracted: Int, total: Int) -> Unit)? = null,
+        onStatus: ((String) -> Unit)? = null
     ): Boolean {
         val pluginDir = getPluginDir(context)
         pluginDir.mkdirs()
@@ -131,6 +144,11 @@ object PluginAssetExtractor {
         }
 
         if (needsExtraction) {
+            if (!pluginsInBaseAssets(context, assetNames.first())) {
+                onStatus?.invoke("Mengunduh plugin")
+                awaitFastFollowPacks(context, onStatus)
+            }
+            onStatus?.invoke("Menyalin plugin")
             Log.d(TAG, "Extracting ${assetNames.size} plugin .so files...")
             val total = assetNames.size
             var extracted = 0
@@ -138,9 +156,14 @@ object PluginAssetExtractor {
             for (name in assetNames) {
                 val dest = File(pluginDir, name)
                 try {
-                    context.assets.open("$PLUGINS_ASSET_DIR/$name").use { input ->
+                    if (dest.isFile && dest.length() > 0L) {
+                        extracted++
+                        onProgress?.invoke(extracted, total)
+                        continue
+                    }
+                    openPlugin(context, name).use { input ->
                         dest.outputStream().use { output ->
-                            input.copyTo(output)
+                            input.copyTo(output, COPY_BUFFER)
                         }
                     }
                     extracted++
@@ -154,15 +177,140 @@ object PluginAssetExtractor {
             Log.d(TAG, "Extraction complete: $extracted/$total plugins")
         }
 
-        // Pre-load DSP .so via System.load() to register them in the
-        // ClassLoader's linker namespace.  Native dlopen() from filesDir
-        // fails on Android 10+ (namespace restriction), but a library
-        // already loaded via System.load() is found by subsequent dlopen().
-        // Skip UI libs (*_ui.so) — they depend on X11/Mesa which aren't
-        // loaded yet; they're handled separately by LV2PluginUI.
-        preloadDspPlugins(pluginDir, assetNames)
-
+        // DSP libraries are loaded after the first screen is up. Native
+        // dlopen of a filesDir .so still needs System.load first, so the
+        // rack waits on awaitDspPreload() before the first plugin is added.
+        startDspPreload(pluginDir, assetNames)
         return true
+    }
+
+    /** Blocks until the background DSP preload finishes, if one was started. */
+    fun awaitDspPreload() {
+        synchronized(preloadLock) {
+            while (preloadRunning && !preloadFinished.get()) {
+                try {
+                    preloadLock.wait(500)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return
+                }
+            }
+        }
+    }
+
+    private fun startDspPreload(pluginDir: File, assetNames: List<String>) {
+        synchronized(preloadLock) {
+            if (preloadRunning || preloadFinished.get()) return
+            preloadRunning = true
+            Thread {
+                try {
+                    preloadDspPlugins(pluginDir, assetNames)
+                } finally {
+                    synchronized(preloadLock) {
+                        preloadFinished.set(true)
+                        preloadRunning = false
+                        preloadLock.notifyAll()
+                    }
+                }
+            }.apply {
+                name = "nadarak-dsp-preload"
+                isDaemon = true
+                start()
+            }
+        }
+    }
+
+    private fun pluginsInBaseAssets(context: Context, sample: String): Boolean =
+        try {
+            context.assets.open("$PLUGINS_ASSET_DIR/$sample").close()
+            true
+        } catch (_: Exception) {
+            false
+        }
+
+    private fun openPlugin(context: Context, name: String): InputStream {
+        try {
+            return context.assets.open("$PLUGINS_ASSET_DIR/$name")
+        } catch (_: Exception) {
+        }
+        val packed = findPackedFile(context, name)
+            ?: throw java.io.FileNotFoundException(name)
+        return packed.inputStream()
+    }
+
+    private fun findPackedFile(context: Context, name: String): File? {
+        val manager = try {
+            AssetPackManagerFactory.getInstance(context)
+        } catch (e: Exception) {
+            Log.w(TAG, "AssetPackManager unavailable: ${e.message}")
+            return null
+        }
+        for (pack in PACK_NAMES) {
+            val location = manager.getPackLocation(pack) ?: continue
+            val candidates = listOfNotNull(
+                location.assetsPath()?.let { File(it, "$PLUGINS_ASSET_DIR/$name") },
+                location.path()?.let { File(it, "assets/$PLUGINS_ASSET_DIR/$name") },
+                location.path()?.let { File(it, "$PLUGINS_ASSET_DIR/$name") },
+            )
+            candidates.firstOrNull { it.isFile }?.let { return it }
+        }
+        return null
+    }
+
+    /** Blocks until every fast-follow pack is on disk, or the wait expires. */
+    private fun awaitFastFollowPacks(context: Context, onStatus: ((String) -> Unit)?) {
+        val manager = try {
+            AssetPackManagerFactory.getInstance(context)
+        } catch (e: Exception) {
+            Log.w(TAG, "Cannot request asset packs: ${e.message}")
+            return
+        }
+        try {
+            Tasks.await(manager.fetch(PACK_NAMES))
+        } catch (e: Exception) {
+            Log.w(TAG, "Asset pack fetch failed: ${e.message}")
+        }
+        val deadline = System.currentTimeMillis() + PACK_WAIT_MS
+        while (System.currentTimeMillis() < deadline) {
+            val states = try {
+                Tasks.await(manager.getPackStates(PACK_NAMES)).packStates()
+            } catch (e: Exception) {
+                Log.w(TAG, "Asset pack status failed: ${e.message}")
+                return
+            }
+            val pending = PACK_NAMES.filter { name ->
+                val status = states[name]?.status() ?: AssetPackStatus.UNKNOWN
+                status != AssetPackStatus.COMPLETED
+            }
+            if (pending.isEmpty()) {
+                Log.d(TAG, "Fast-follow packs ready")
+                return
+            }
+            val failed = pending.filter { name ->
+                val status = states[name]?.status()
+                status == AssetPackStatus.FAILED || status == AssetPackStatus.CANCELED
+            }
+            if (failed.isNotEmpty()) {
+                Log.e(TAG, "Asset packs not available: $failed")
+                return
+            }
+            val bytes = pending.sumOf { name -> states[name]?.bytesDownloaded() ?: 0L }
+            val total = pending.sumOf { name -> states[name]?.totalBytesToDownload() ?: 0L }
+            val label = if (total > 0L) {
+                "Mengunduh plugin ${bytes * 100 / total}%"
+            } else {
+                "Mengunduh plugin"
+            }
+            onStatus?.invoke(label)
+            Log.d(TAG, "Waiting for asset packs: $pending ($label)")
+            try {
+                Thread.sleep(1000)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return
+            }
+        }
+        Log.e(TAG, "Timed out waiting for fast-follow asset packs")
     }
 
     private fun preloadDspPlugins(pluginDir: File, assetNames: List<String>) {
