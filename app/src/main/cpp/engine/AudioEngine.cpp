@@ -38,6 +38,16 @@
 
 namespace guitarrackcraft {
 
+// Startup sequence for the mic FIFO, mirroring Oboe's FullDuplexStream: drain
+// the stale backlog, let a small cushion build back, then let input and output
+// settle. The chain is fed silence throughout, so the whole thing is inaudible.
+// The cushion grows by itself if the device turns out to need more.
+static constexpr int32_t kInputDrainCallbacks = 16;
+static constexpr int32_t kInputSettleCallbacks = 24;
+static constexpr int32_t kInputCushionCallbacks = 1;
+static constexpr int32_t kInputMaxCushionCallbacks = 4;
+static constexpr int32_t kInputUnderrunsBeforeGrow = 4;
+
 AudioEngine::AudioEngine()
     : sampleRate_(48000.0f)
     , isRunning_(false)
@@ -340,6 +350,10 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
             std::memset(inputBuffer_.data() + toCopy, 0, (numFrames - toCopy) * sizeof(float));
             wavPlaying_.store(false);
         }
+    } else if (inputStream_ && inputShedEnabled_.load(std::memory_order_relaxed) &&
+               inputBuffer_.size() >= static_cast<size_t>(numFrames) &&
+               serviceInputStartup(numFrames)) {
+        // Startup sequence owns the input this callback and left it silent.
     } else {
         int32_t framesRead = 0;
         if (inputStream_) {
@@ -350,6 +364,9 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
         }
         if (framesRead < numFrames) {
             std::memset(inputBuffer_.data() + framesRead, 0, (numFrames - framesRead) * sizeof(float));
+            if (inputShedEnabled_.load(std::memory_order_relaxed)) {
+                noteInputUnderrun(numFrames);
+            }
         }
     }
 
@@ -705,10 +722,102 @@ bool AudioEngine::createAudioStreams(float sampleRate) {
     outputBufferLeft_.resize(bufferSize);
     outputBufferRight_.resize(bufferSize);
 
+    // The mic ran while the output stream was being opened and started. Hand
+    // that head start to the startup sequence instead of carrying it all session.
+    inputUnderrunCount_.store(0);
+    inputQueueFrames_.store(0);
+    inputRestartPrime_.store(true);
+
     LOGI("Audio streams created: %d Hz, buffer size: %d frames", 
          static_cast<int>(sampleRate_), bufferSize);
 
     return true;
+}
+
+int32_t AudioEngine::queuedInputFrames() const {
+    if (!inputStream_) return 0;
+    auto available = inputStream_->getAvailableFrames();
+    return available ? available.value() : 0;
+}
+
+void AudioEngine::enterInputStage(InputStage stage, int32_t numFrames) {
+    inputStage_ = stage;
+    inputStageCallbacks_ = 0;
+    if (stage == InputStage::Live) {
+        const int32_t queued = queuedInputFrames();
+        inputQueueFrames_.store(queued);
+        LOGI("input prime: live, queue %d frames (%.1f ms), cushion %d callbacks of %d",
+             queued, (queued / static_cast<double>(sampleRate_)) * 1000.0,
+             inputCushionCallbacks_, numFrames);
+    }
+}
+
+bool AudioEngine::serviceInputStartup(int32_t numFrames) {
+    if (inputRestartPrime_.exchange(false, std::memory_order_relaxed)) {
+        inputStartupBacklogFrames_.store(queuedInputFrames());
+        inputCushionCallbacks_ = kInputCushionCallbacks;
+        enterInputStage(InputStage::Drain, numFrames);
+    }
+
+    if (inputStage_ == InputStage::Live) {
+        return false;
+    }
+
+    switch (inputStage_) {
+        case InputStage::Drain:
+            // Empty the FIFO. Everything recorded while the output stream was
+            // opening is stale, and keeping it is exactly what turns into a
+            // permanent pluck-to-amp delay.
+            while (true) {
+                auto result = inputStream_->read(inputBuffer_.data(), numFrames, 0);
+                if (!result || result.value() <= 0) break;
+            }
+            if (++inputStageCallbacks_ >= kInputDrainCallbacks) {
+                enterInputStage(InputStage::Cushion, numFrames);
+            }
+            break;
+
+        case InputStage::Cushion:
+            // Read nothing, so the FIFO refills to the cushion the device needs
+            // to survive its own scheduling jitter.
+            if (++inputStageCallbacks_ >= inputCushionCallbacks_) {
+                enterInputStage(InputStage::Settle, numFrames);
+            }
+            break;
+
+        case InputStage::Settle:
+            // Normal reads, still silent, so input and output reach equilibrium
+            // before the guitar is audible.
+            inputStream_->read(inputBuffer_.data(), numFrames, 0);
+            if (++inputStageCallbacks_ >= kInputSettleCallbacks) {
+                enterInputStage(InputStage::Live, numFrames);
+            }
+            break;
+
+        case InputStage::Live:
+            break;
+    }
+
+    // The chain runs on silence until the sequence finishes, so none of this is
+    // audible: no clicks, no half-filled buffers reaching the amp.
+    std::memset(inputBuffer_.data(), 0, numFrames * sizeof(float));
+    return true;
+}
+
+void AudioEngine::noteInputUnderrun(int32_t numFrames) {
+    const int32_t count = inputUnderrunCount_.fetch_add(1) + 1;
+    if (inputCushionCallbacks_ >= kInputMaxCushionCallbacks) {
+        return;
+    }
+    if (count % kInputUnderrunsBeforeGrow != 0) {
+        return;
+    }
+    // The cushion was too thin for this device. Give it one more callback and
+    // rebuild it, instead of letting the chain keep stuttering.
+    inputCushionCallbacks_++;
+    LOGI("input prime: %d underruns, growing cushion to %d callbacks",
+         count, inputCushionCallbacks_);
+    enterInputStage(InputStage::Cushion, numFrames);
 }
 
 void AudioEngine::closeStreams() {

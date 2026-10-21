@@ -53,4 +53,10 @@ object AudioEngine {
     fun isInputClipping(): Boolean = native.isInputClipping()
     fun isOutputClipping(): Boolean = native.isOutputClipping()
     fun resetClipping() = native.resetClipping()
+
+    /** Applies on the next engine start. */
+    fun setInputShedEnabled(enabled: Boolean) = native.nativeSetInputShedEnabled(enabled)
+    fun getInputStartupBacklogFrames(): Int = native.nativeGetInputStartupBacklogFrames()
+    fun getInputQueueFrames(): Int = native.nativeGetInputQueueFrames()
+    fun getInputUnderrunCount(): Int = native.nativeGetInputUnderrunCount()
 }

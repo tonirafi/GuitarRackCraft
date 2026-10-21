@@ -136,6 +136,9 @@ class RackViewModel(application: Application) : AndroidViewModel(application) {
         val inputId = com.varcain.guitarrackcraft.engine.AudioSettingsManager.getInputDeviceId(ctx)
         val outputId = com.varcain.guitarrackcraft.engine.AudioSettingsManager.getOutputDeviceId(ctx)
         val bufSize = com.varcain.guitarrackcraft.engine.AudioSettingsManager.getBufferSize(ctx)
+        AudioEngine.setInputShedEnabled(
+            com.varcain.guitarrackcraft.engine.AudioSettingsManager.getShortenInputDelay(ctx)
+        )
         startEngine(inputDeviceId = inputId, outputDeviceId = outputId, bufferFrames = bufSize)
         updateRackState()
 
@@ -215,6 +218,9 @@ class RackViewModel(application: Application) : AndroidViewModel(application) {
             val outputId = com.varcain.guitarrackcraft.engine.AudioSettingsManager.getOutputDeviceId(context)
             val bufSize = com.varcain.guitarrackcraft.engine.AudioSettingsManager.getBufferSize(context)
             android.util.Log.i("AudioLifecycle", "RackViewModel.restartEngine(input=$inputId, output=$outputId, buf=$bufSize)")
+            AudioEngine.setInputShedEnabled(
+                com.varcain.guitarrackcraft.engine.AudioSettingsManager.getShortenInputDelay(context)
+            )
             stopEngine()
             delay(100)
             startEngine(inputDeviceId = inputId, outputDeviceId = outputId, bufferFrames = bufSize)

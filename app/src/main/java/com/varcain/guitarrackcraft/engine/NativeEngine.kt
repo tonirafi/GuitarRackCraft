@@ -415,6 +415,10 @@ class NativeEngine private constructor() {
     external fun nativeIsWavLoaded(): Boolean
     external fun nativeSetChainBypass(bypass: Boolean)
     external fun nativeSetWavBypassChain(bypass: Boolean)
+    external fun nativeSetInputShedEnabled(enabled: Boolean)
+    external fun nativeGetInputStartupBacklogFrames(): Int
+    external fun nativeGetInputQueueFrames(): Int
+    external fun nativeGetInputUnderrunCount(): Int
 
     // Kotlin-friendly wrapper methods
     fun setChainBypass(bypass: Boolean) = nativeSetChainBypass(bypass)

@@ -64,6 +64,7 @@ fun AudioSettingsScreen(
     var selectedInputId by remember { mutableIntStateOf(AudioSettingsManager.getInputDeviceId(context)) }
     var selectedOutputId by remember { mutableIntStateOf(AudioSettingsManager.getOutputDeviceId(context)) }
     var selectedBufferSize by remember { mutableIntStateOf(AudioSettingsManager.getBufferSize(context)) }
+    var shortenInputDelay by remember { mutableStateOf(AudioSettingsManager.getShortenInputDelay(context)) }
     var refreshKey by remember { mutableIntStateOf(0) }
 
     BackHandler { onNavigateBack() }
@@ -131,6 +132,37 @@ fun AudioSettingsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
+            Divider()
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Pangkas jeda petikan",
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                    Text(
+                        text = "Buang antrean mikrofon yang menumpuk saat mesin dinyalakan, " +
+                            "lalu bangun ulang cadangan secukupnya. Sekitar seperlima detik " +
+                            "pertama sengaja dibikin senyap supaya prosesnya tidak terdengar. " +
+                            "Kalau suara sempat tersendat, cadangan ditambah sendiri.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = shortenInputDelay,
+                    onCheckedChange = { enabled ->
+                        shortenInputDelay = enabled
+                        AudioSettingsManager.setShortenInputDelay(context, enabled)
+                        viewModel.restartEngine(context)
+                        refreshKey++
+                    }
+                )
+            }
+
             if (BuildConfig.USE_ASSET_PACKS) {
                 PluginRedownloadSection(viewModel)
             }
@@ -152,6 +184,15 @@ fun AudioSettingsScreen(
                 InfoRow("Buffer Size", "$bufferFrames frames")
                 InfoRow("Burst Size", "${streamInfo.framesPerBurst} frames")
                 InfoRow("Audio Format", "32-bit Float")
+                val backlogFrames = remember(refreshKey) { AudioEngine.getInputStartupBacklogFrames() }
+                val queueFrames = remember(refreshKey) { AudioEngine.getInputQueueFrames() }
+                val underruns = remember(refreshKey) { AudioEngine.getInputUnderrunCount() }
+                if (sampleRate > 0f) {
+                    fun ms(frames: Int) = "$frames frames (%.1f ms)".format(frames / sampleRate * 1000f)
+                    if (backlogFrames > 0) InfoRow("Antrean mikrofon saat mulai", ms(backlogFrames))
+                    if (queueFrames > 0) InfoRow("Antrean mikrofon sekarang", ms(queueFrames))
+                    if (shortenInputDelay) InfoRow("Suara tersendat", "$underruns kali")
+                }
 
                 Spacer(modifier = Modifier.height(4.dp))
                 Divider()

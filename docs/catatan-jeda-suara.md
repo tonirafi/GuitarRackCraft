@@ -18,15 +18,33 @@ Jangan diulang.
 
 Layanan latar `EffectKeepAliveService`: notifikasi, wake lock, tipe `microphone|mediaPlayback`. Ini yang menahan efek saat layar mati, layar kunci, dan aplikasi di belakang. Bukan bagian dari rantai sampel.
 
-## Cara pendekkan jeda nanti
+## Cara pendekkan jeda
 
 Penyebab jeda di jalur asli: mikrofon mengantre sampel lama, lalu tiap callback hanya membaca `numFrames`, jadi selisih itu tidak pernah habis.
 
-Yang aman dicoba, satu perubahan saja, lalu dengarkan sebelum menambah yang lain:
+Mikrofon dibuka dan dijalankan lebih dulu, baru stream keluaran. Selama jeda itu mikrofon sudah merekam. Saat callback pertama membaca, antrean itu sudah berisi, dan karena setiap pembacaan mengambil sampel paling lama, kepala antrean itu dibawa terus sampai mesin dimatikan.
 
-1. Buang antrean lama sekali di awal, hanya kalau antrean sudah empat callback atau lebih.
-2. Sisakan dua callback. Jangan potong lagi selama main.
-3. Jangan ganti preset, usage, atau ukuran callback pangkat dua.
-4. Jangan turunkan buffer output di bawah dua burst.
+### Sudah dipasang, tapi mati secara bawaan
 
-Di bawah satu buffer (beberapa milidetik) suara pecah. Delay bawaan plugin kabinet tidak hilang dengan mengubah buffer.
+`AudioEngine::serviceInputStartup()`, menyalin urutan resmi Oboe di `FullDuplexStream.h`. Selama urutan ini jalan, `inputBuffer_` diisi senyap, jadi rantai efek memproses diam dan tidak ada bunyi aneh yang sampai ke ampli:
+
+1. **Drain**, 16 callback: baca mikrofon berulang sampai antrean benar-benar kosong.
+2. **Cushion**, 1 callback: tidak membaca sama sekali, biarkan antrean terisi lagi seperlunya.
+3. **Settle**, 24 callback: baca normal sampai masukan dan keluaran seimbang.
+4. **Live**: rantai efek mulai terdengar.
+
+Totalnya sekitar 40 callback, kira-kira 0,2 detik saat mesin start, jadi tidak terdengar.
+
+Bedanya dengan percobaan lama: cadangan tidak lagi ditebak dengan angka mati. Antrean dikosongkan lalu perangkat sendiri yang menentukan titik seimbangnya, dan kalau masih kurang, `noteInputUnderrun()` menambah satu callback cadangan tiap empat kali tersendat sampai maksimal empat, lalu mengulang tahap Cushion. Jadi kalau perangkatnya butuh cadangan lebih, dia menaikkannya sendiri tanpa perlu diutak-atik.
+
+Saklarnya: **Pengaturan audio → Pangkas jeda petikan**, bawaannya mati. Tersimpan di `audio_settings/shortenInputDelay`, dikirim ke mesin lewat `nativeSetInputShedEnabled` sebelum start, dan mengubahnya memicu restart mesin. Selama mati, jalur suara sama persis dengan kode 6 dan 8: `git diff` pada folder `cpp/` nol baris terhapus, jadi kode lama tidak tersentuh sama sekali.
+
+### Batas yang tidak bisa dihilangkan
+
+Jeda tidak mungkin nol. Yang tersisa setelah antrean mikrofon beres: buffer keluaran dua burst, cadangan mikrofon satu callback, delay bawaan plugin kabinet atau IR, dan konversi ADC/DAC perangkat yang di luar kendali aplikasi. Di Android itu biasanya belasan sampai puluhan milidetik.
+
+Pengaturan audio menampilkan "Antrean mikrofon sekarang" dan "Suara tersendat". Kalau antrean kecil tapi jeda masih terasa, sumbernya plugin, bukan buffer.
+
+### Kalau masih terasa
+
+Jangan ganti preset, usage, atau ukuran callback pangkat dua. Jangan turunkan buffer output di bawah dua burst. Di bawah satu buffer (beberapa milidetik) suara pecah. Delay bawaan plugin kabinet tidak hilang dengan mengubah buffer: coba lepas kabinet atau IR dulu untuk memisahkan sumber jeda.

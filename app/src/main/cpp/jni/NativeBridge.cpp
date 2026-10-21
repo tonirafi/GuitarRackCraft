@@ -1341,6 +1341,37 @@ Java_com_varcain_guitarrackcraft_engine_NativeEngine_nativeSetChainBypass(JNIEnv
 }
 
 JNIEXPORT void JNICALL
+Java_com_varcain_guitarrackcraft_engine_NativeEngine_nativeSetInputShedEnabled(JNIEnv* /*env*/, jobject /*thiz*/, jboolean enabled) {
+    if (g_ctx && g_ctx->audioEngine) {
+        g_ctx->audioEngine->setInputShedEnabled(enabled == JNI_TRUE);
+    }
+}
+
+JNIEXPORT jint JNICALL
+Java_com_varcain_guitarrackcraft_engine_NativeEngine_nativeGetInputStartupBacklogFrames(JNIEnv* /*env*/, jobject /*thiz*/) {
+    if (g_ctx && g_ctx->audioEngine) {
+        return static_cast<jint>(g_ctx->audioEngine->getInputStartupBacklogFrames());
+    }
+    return 0;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_varcain_guitarrackcraft_engine_NativeEngine_nativeGetInputQueueFrames(JNIEnv* /*env*/, jobject /*thiz*/) {
+    if (g_ctx && g_ctx->audioEngine) {
+        return static_cast<jint>(g_ctx->audioEngine->getInputQueueFrames());
+    }
+    return 0;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_varcain_guitarrackcraft_engine_NativeEngine_nativeGetInputUnderrunCount(JNIEnv* /*env*/, jobject /*thiz*/) {
+    if (g_ctx && g_ctx->audioEngine) {
+        return static_cast<jint>(g_ctx->audioEngine->getInputUnderrunCount());
+    }
+    return 0;
+}
+
+JNIEXPORT void JNICALL
 Java_com_varcain_guitarrackcraft_engine_NativeEngine_nativeSetWavBypassChain(JNIEnv* /*env*/, jobject /*thiz*/, jboolean bypass) {
     if (g_ctx && g_ctx->audioEngine) {
         g_ctx->audioEngine->setWavBypassChain(bypass == JNI_TRUE);

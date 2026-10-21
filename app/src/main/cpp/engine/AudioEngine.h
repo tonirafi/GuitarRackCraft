@@ -74,6 +74,25 @@ public:
      */
     uint32_t getCallbackFrameCount() const { return callbackFrameCount_; }
 
+    /**
+     * Opt in to dropping the mic FIFO head start at engine start. Off by
+     * default: it trades part of the input cushion for a shorter pluck-to-amp
+     * delay. Takes effect on the next start.
+     */
+    void setInputShedEnabled(bool enabled) { inputShedEnabled_.store(enabled); }
+    bool isInputShedEnabled() const { return inputShedEnabled_.load(); }
+
+    /** Frames queued in the mic FIFO right after the last start. */
+    int32_t getInputStartupBacklogFrames() const {
+        return inputStartupBacklogFrames_.load();
+    }
+
+    /** Frames left queued once the startup sequence handed over to the chain. */
+    int32_t getInputQueueFrames() const { return inputQueueFrames_.load(); }
+
+    /** Short mic reads since the last start. Non-zero means the chain stuttered. */
+    int32_t getInputUnderrunCount() const { return inputUnderrunCount_.load(); }
+
     struct StreamInfo {
         bool isAAudio = false;         // AAudio vs OpenSL ES
         bool inputExclusive = false;   // Exclusive sharing mode granted
@@ -186,6 +205,22 @@ private:
     std::atomic<bool> isRunning_;
     std::atomic<bool> chainBypass_{false};  // skip chain processing (passthrough)
 
+    // The mic stream starts before the output stream, so by the time the first
+    // output callback reads, the mic FIFO already holds everything recorded in
+    // between. Each callback then reads the oldest frames, so that head start
+    // becomes permanent pluck-to-amp delay. It is dropped once per start.
+    enum class InputStage { Drain, Cushion, Settle, Live };
+
+    std::atomic<bool>    inputRestartPrime_{false};
+    std::atomic<bool>    inputShedEnabled_{false};
+    std::atomic<int32_t> inputStartupBacklogFrames_{0};
+    std::atomic<int32_t> inputQueueFrames_{0};
+    std::atomic<int32_t> inputUnderrunCount_{0};
+    // Audio thread only, after inputRestartPrime_ is consumed.
+    InputStage inputStage_{InputStage::Live};
+    int32_t    inputStageCallbacks_{0};
+    int32_t    inputCushionCallbacks_{1};
+
     // Audio buffers for processing
     std::vector<float> inputBuffer_;
     std::vector<float> outputBufferLeft_;
@@ -237,6 +272,14 @@ private:
 
     bool createAudioStreams(float sampleRate);
     void closeStreams();
+    /**
+     * Runs the drain/cushion/settle sequence on the mic FIFO after a start.
+     * Returns true while it owns the input, leaving inputBuffer_ silent.
+     */
+    bool serviceInputStartup(int32_t numFrames);
+    void enterInputStage(InputStage stage, int32_t numFrames);
+    void noteInputUnderrun(int32_t numFrames);
+    int32_t queuedInputFrames() const;
     void resampleToEngineRate(const std::vector<float>& src, uint32_t srcRate,
                               std::vector<float>& dst);
 };

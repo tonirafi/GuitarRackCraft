@@ -1,6 +1,7 @@
 GitarRak — teks Play Store (Bahasa Indonesia)
 Judul, deskripsi, ikon, feature graphic, dan Data safety sudah diunggah.
-Track produksi masih kosong. Rilis internal: 1.0.0 (8).
+Rilis internal dan produksi: 1.0.0 (9), status completed, 21 Okt 2026.
+Catatan produksi: nama GitarRak plus saklar pangkas jeda petikan (mati bawaan).
 
 Paket Play Store
 com.gdt.nadarak

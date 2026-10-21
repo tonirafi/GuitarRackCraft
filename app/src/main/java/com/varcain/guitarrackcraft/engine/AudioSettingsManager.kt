@@ -34,6 +34,7 @@ object AudioSettingsManager {
     private const val KEY_INPUT_DEVICE_ID = "inputDeviceId"
     private const val KEY_OUTPUT_DEVICE_ID = "outputDeviceId"
     private const val KEY_BUFFER_SIZE = "bufferSize"
+    private const val KEY_SHORTEN_INPUT_DELAY = "shortenInputDelay"
 
     val BUFFER_SIZE_OPTIONS = listOf(
         0 to "Auto",
@@ -68,6 +69,17 @@ object AudioSettingsManager {
 
     fun setBufferSize(context: Context, size: Int) {
         prefs(context).edit().putInt(KEY_BUFFER_SIZE, size).apply()
+    }
+
+    /**
+     * Off by default. Trades part of the mic cushion for a shorter pluck-to-amp
+     * delay, so it can stutter on some devices.
+     */
+    fun getShortenInputDelay(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_SHORTEN_INPUT_DELAY, false)
+
+    fun setShortenInputDelay(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_SHORTEN_INPUT_DELAY, enabled).apply()
     }
 
     fun getInputDevices(context: Context): List<AudioDeviceOption> {
