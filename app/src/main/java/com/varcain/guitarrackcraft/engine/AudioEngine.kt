@@ -25,9 +25,21 @@ package com.varcain.guitarrackcraft.engine
 object AudioEngine {
     private val native get() = NativeEngine.getInstance()
 
-    fun start(sampleRate: Float = 48000f, inputDeviceId: Int = 0, outputDeviceId: Int = 0, bufferFrames: Int = 0): Boolean =
-        native.startEngine(sampleRate, inputDeviceId, outputDeviceId, bufferFrames)
-    fun stop() = native.stopEngine()
+    fun start(sampleRate: Float = 48000f, inputDeviceId: Int = 0, outputDeviceId: Int = 0, bufferFrames: Int = 0): Boolean {
+        val started = native.startEngine(sampleRate, inputDeviceId, outputDeviceId, bufferFrames)
+        if (started) EffectKeepAliveService.sync(true)
+        return started
+    }
+
+    fun stop() {
+        native.stopEngine()
+        EffectKeepAliveService.sync(false)
+    }
+
+    /** Stops audio without touching the keep-alive service. Used when the service itself is going away. */
+    fun releasePlayback() {
+        if (isRunning()) native.stopEngine()
+    }
     fun isRunning(): Boolean = native.isEngineRunning()
     fun getSampleRate(): Float = native.getSampleRate()
     fun getBufferFrameCount(): Int = native.getBufferFrameCount()

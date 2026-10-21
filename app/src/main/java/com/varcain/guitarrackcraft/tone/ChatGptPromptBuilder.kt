@@ -136,7 +136,7 @@ class ChatGptPromptBuilder {
         }
         val required = plugins.joinToString("\n") { "- ${it.uri}" }
         return """
-            Kamu menulis preset efek gitar untuk aplikasi NadaRak.
+            Kamu menulis preset efek gitar untuk aplikasi GitarRak.
             Permintaan pengguna: $request
             Suara yang diinginkan: ${soundHint(request)}
             Ini perkiraan latihan, bukan setelan studio asli dan bukan nada resmi sebuah lagu.

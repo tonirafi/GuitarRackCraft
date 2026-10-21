@@ -19,13 +19,20 @@
 
 package com.varcain.guitarrackcraft.engine
 
+import android.app.Activity
 import android.content.Context
 import android.util.Log
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.IntentSenderRequest
+import com.google.android.gms.tasks.Task
 import com.google.android.gms.tasks.Tasks
+import com.google.android.play.core.assetpacks.AssetPackManager
 import com.google.android.play.core.assetpacks.AssetPackManagerFactory
 import com.google.android.play.core.assetpacks.model.AssetPackStatus
 import java.io.File
+import java.io.FileInputStream
 import java.io.InputStream
+import java.lang.ref.WeakReference
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -54,8 +61,20 @@ object PluginAssetExtractor {
     private const val PACK_WAIT_MS = 15 * 60 * 1000L
     private const val COPY_BUFFER = 1024 * 1024
     private val preloadLock = Object()
+    private val extractLock = Object()
     private val preloadFinished = AtomicBoolean(false)
     @Volatile private var preloadRunning = false
+    private var hostActivity: WeakReference<Activity>? = null
+    private var cellularLauncher: ActivityResultLauncher<IntentSenderRequest>? = null
+
+    /** Activity used to show Play's download confirmation dialog. */
+    fun attach(
+        activity: Activity,
+        cellularConfirmation: ActivityResultLauncher<IntentSenderRequest>
+    ) {
+        hostActivity = WeakReference(activity)
+        cellularLauncher = cellularConfirmation
+    }
 
     /**
      * Directory where extracted plugin .so files are stored.
@@ -98,12 +117,49 @@ object PluginAssetExtractor {
      * Ensure plugins are extracted. Skips the copy when this version is already
      * on disk. DSP System.load runs in the background so the first screen can open.
      * @param onProgress optional callback: (extracted, total) counts
-     * @return true if extraction completed (or was already up to date)
+     * @return true if every plugin file is on disk
      */
     fun ensurePluginsExtracted(
         context: Context,
         onProgress: ((extracted: Int, total: Int) -> Unit)? = null,
         onStatus: ((String) -> Unit)? = null
+    ): Boolean = synchronized(extractLock) {
+        extractPlugins(context, force = false, onProgress, onStatus)
+    }
+
+    /**
+     * Deletes the local copies, asks Play to fetch the packs again, then copies
+     * them once more. Already-loaded libraries stay mapped until the process restarts.
+     */
+    fun redownloadPlugins(
+        context: Context,
+        onProgress: ((extracted: Int, total: Int) -> Unit)? = null,
+        onStatus: ((String) -> Unit)? = null
+    ): Boolean = synchronized(extractLock) {
+        awaitDspPreload()
+        onStatus?.invoke("Menghapus plugin lama")
+        val pluginDir = getPluginDir(context)
+        pluginDir.listFiles()?.forEach { file ->
+            if (file.isDirectory) file.deleteRecursively() else file.delete()
+        }
+        val manager = packManager(context)
+        if (manager != null) {
+            for (pack in PACK_NAMES) {
+                try {
+                    Tasks.await(manager.removePack(pack))
+                } catch (e: Exception) {
+                    Log.w(TAG, "removePack $pack: ${e.message}")
+                }
+            }
+        }
+        extractPlugins(context, force = true, onProgress, onStatus)
+    }
+
+    private fun extractPlugins(
+        context: Context,
+        force: Boolean,
+        onProgress: ((extracted: Int, total: Int) -> Unit)?,
+        onStatus: ((String) -> Unit)?
     ): Boolean {
         val pluginDir = getPluginDir(context)
         pluginDir.mkdirs()
@@ -123,30 +179,34 @@ object PluginAssetExtractor {
             return true
         }
 
-        // Stamp format: "<versionCode>:<count>"
-        var needsExtraction = true
         val stampFile = File(pluginDir, VERSION_STAMP_FILE)
-        if (stampFile.exists()) {
+        var needsExtraction = force || !stampFile.isFile
+        if (!needsExtraction) {
             val parts = stampFile.readText().trim().split(":")
             val stampedVersion = parts.getOrNull(0)?.toLongOrNull() ?: 0L
             val stampedCount = parts.getOrNull(1)?.toIntOrNull() ?: 0
-            if (stampedVersion == currentVersion && stampedCount > 0 && stampedCount >= assetNames.size) {
+            if (stampedVersion == currentVersion && stampedCount >= assetNames.size) {
                 val sample = assetNames.firstOrNull()
-                if (sample == null || File(pluginDir, sample).exists()) {
+                if (sample == null || File(pluginDir, sample).isFile) {
                     Log.d(TAG, "Plugins already extracted for version $currentVersion ($stampedCount files)")
-                    needsExtraction = false
                 } else {
                     Log.d(TAG, "Stamp OK but files missing on disk, re-extracting")
+                    needsExtraction = true
                 }
             } else {
                 Log.d(TAG, "Stamp mismatch (v=$stampedVersion/$currentVersion, n=$stampedCount/${assetNames.size}), re-extracting")
+                needsExtraction = true
             }
         }
 
         if (needsExtraction) {
             if (!pluginsInBaseAssets(context, assetNames.first())) {
                 onStatus?.invoke("Mengunduh plugin")
-                awaitFastFollowPacks(context, onStatus)
+                val packsReady = awaitFastFollowPacks(context, onStatus)
+                if (!packsReady) {
+                    onStatus?.invoke("Unduhan plugin gagal. Periksa koneksi, lalu coba lagi.")
+                    return false
+                }
             }
             onStatus?.invoke("Menyalin plugin")
             Log.d(TAG, "Extracting ${assetNames.size} plugin .so files...")
@@ -156,16 +216,26 @@ object PluginAssetExtractor {
             for (name in assetNames) {
                 val dest = File(pluginDir, name)
                 try {
-                    if (dest.isFile && dest.length() > 0L) {
+                    val expected = packedSize(context, name)
+                    if (!force && dest.isFile && dest.length() > 0L &&
+                        (expected <= 0L || dest.length() == expected)
+                    ) {
                         extracted++
                         onProgress?.invoke(extracted, total)
                         continue
                     }
+                    if (dest.exists()) dest.delete()
                     openPlugin(context, name).use { input ->
                         dest.outputStream().use { output ->
                             input.copyTo(output, COPY_BUFFER)
                         }
                     }
+                    if (expected > 0L && dest.length() != expected) {
+                        dest.delete()
+                        Log.e(TAG, "Size mismatch for $name: ${dest.length()} != $expected")
+                        continue
+                    }
+                    if (!dest.isFile || dest.length() <= 0L) continue
                     extracted++
                     onProgress?.invoke(extracted, total)
                 } catch (e: Exception) {
@@ -173,6 +243,12 @@ object PluginAssetExtractor {
                 }
             }
 
+            if (extracted != total) {
+                stampFile.delete()
+                Log.e(TAG, "Extraction incomplete: $extracted/$total")
+                onStatus?.invoke("Plugin belum lengkap ($extracted/$total). Coba lagi.")
+                return false
+            }
             stampFile.writeText("$currentVersion:$extracted")
             Log.d(TAG, "Extraction complete: $extracted/$total plugins")
         }
@@ -233,10 +309,49 @@ object PluginAssetExtractor {
             return context.assets.open("$PLUGINS_ASSET_DIR/$name")
         } catch (_: Exception) {
         }
+        val located = locateAsset(context, name)
+        if (located != null) {
+            val raw = FileInputStream(located.file)
+            skipFully(raw, located.offset)
+            return if (located.size > 0L) BoundedInputStream(raw, located.size) else raw
+        }
         val packed = findPackedFile(context, name)
             ?: throw java.io.FileNotFoundException(name)
         return packed.inputStream()
     }
+
+    private fun packedSize(context: Context, name: String): Long {
+        val located = locateAsset(context, name)
+        if (located != null && located.size > 0L) return located.size
+        return findPackedFile(context, name)?.length() ?: -1L
+    }
+
+    private data class LocatedAsset(val file: File, val offset: Long, val size: Long)
+
+    private fun locateAsset(context: Context, name: String): LocatedAsset? {
+        val manager = packManager(context) ?: return null
+        val assetPath = "$PLUGINS_ASSET_DIR/$name"
+        for (pack in PACK_NAMES) {
+            val location = try {
+                manager.getAssetLocation(pack, assetPath)
+            } catch (_: Exception) {
+                null
+            } ?: continue
+            val path = location.path() ?: continue
+            val file = File(path)
+            if (!file.isFile) continue
+            return LocatedAsset(file, location.offset().coerceAtLeast(0L), location.size())
+        }
+        return null
+    }
+
+    private fun packManager(context: Context): AssetPackManager? =
+        try {
+            AssetPackManagerFactory.getInstance(context)
+        } catch (e: Exception) {
+            Log.w(TAG, "AssetPackManager unavailable: ${e.message}")
+            null
+        }
 
     private fun findPackedFile(context: Context, name: String): File? {
         val manager = try {
@@ -258,25 +373,27 @@ object PluginAssetExtractor {
     }
 
     /** Blocks until every fast-follow pack is on disk, or the wait expires. */
-    private fun awaitFastFollowPacks(context: Context, onStatus: ((String) -> Unit)?) {
-        val manager = try {
-            AssetPackManagerFactory.getInstance(context)
-        } catch (e: Exception) {
-            Log.w(TAG, "Cannot request asset packs: ${e.message}")
-            return
+    private fun awaitFastFollowPacks(context: Context, onStatus: ((String) -> Unit)?): Boolean {
+        val manager = packManager(context) ?: return false
+        fun requestFetch() {
+            try {
+                Tasks.await(manager.fetch(PACK_NAMES))
+            } catch (e: Exception) {
+                Log.w(TAG, "Asset pack fetch failed: ${e.message}")
+            }
         }
-        try {
-            Tasks.await(manager.fetch(PACK_NAMES))
-        } catch (e: Exception) {
-            Log.w(TAG, "Asset pack fetch failed: ${e.message}")
-        }
+        requestFetch()
+        var retries = 0
+        var confirmationAt = 0L
+        var cellularAt = 0L
         val deadline = System.currentTimeMillis() + PACK_WAIT_MS
         while (System.currentTimeMillis() < deadline) {
             val states = try {
                 Tasks.await(manager.getPackStates(PACK_NAMES)).packStates()
             } catch (e: Exception) {
                 Log.w(TAG, "Asset pack status failed: ${e.message}")
-                return
+                if (!sleepBriefly()) return false
+                continue
             }
             val pending = PACK_NAMES.filter { name ->
                 val status = states[name]?.status() ?: AssetPackStatus.UNKNOWN
@@ -284,33 +401,131 @@ object PluginAssetExtractor {
             }
             if (pending.isEmpty()) {
                 Log.d(TAG, "Fast-follow packs ready")
-                return
+                return true
             }
             val failed = pending.filter { name ->
                 val status = states[name]?.status()
                 status == AssetPackStatus.FAILED || status == AssetPackStatus.CANCELED
             }
             if (failed.isNotEmpty()) {
-                Log.e(TAG, "Asset packs not available: $failed")
-                return
+                val detail = failed.joinToString { name ->
+                    val state = states[name]
+                    "$name:${state?.status()}/${state?.errorCode()}"
+                }
+                Log.e(TAG, "Asset packs not available: $detail")
+                if (retries < 1) {
+                    retries++
+                    onStatus?.invoke("Mengulang unduhan")
+                    requestFetch()
+                    if (!sleepBriefly(2000)) return false
+                    continue
+                }
+                return false
             }
-            val bytes = pending.sumOf { name -> states[name]?.bytesDownloaded() ?: 0L }
-            val total = pending.sumOf { name -> states[name]?.totalBytesToDownload() ?: 0L }
-            val label = if (total > 0L) {
-                "Mengunduh plugin ${bytes * 100 / total}%"
-            } else {
-                "Mengunduh plugin"
+            val now = System.currentTimeMillis()
+            val needsConfirm = pending.any { name ->
+                states[name]?.status() == AssetPackStatus.REQUIRES_USER_CONFIRMATION
             }
-            onStatus?.invoke(label)
-            Log.d(TAG, "Waiting for asset packs: $pending ($label)")
-            try {
-                Thread.sleep(1000)
-            } catch (_: InterruptedException) {
-                Thread.currentThread().interrupt()
-                return
+            val needsWifi = pending.any { name ->
+                states[name]?.status() == AssetPackStatus.WAITING_FOR_WIFI
             }
+            if (needsConfirm && now - confirmationAt > 20_000L) {
+                confirmationAt = now
+                onStatus?.invoke("Konfirmasi unduhan di Play Store")
+                showPlayDialog { activity ->
+                    manager.showConfirmationDialog(activity)
+                }
+            } else if (needsWifi && now - cellularAt > 20_000L) {
+                cellularAt = now
+                onStatus?.invoke("Izinkan unduhan lewat data seluler, atau sambungkan Wi-Fi")
+                showCellularConfirmation(manager)
+            } else if (!needsConfirm && !needsWifi) {
+                val bytes = pending.sumOf { name -> states[name]?.bytesDownloaded() ?: 0L }
+                val total = pending.sumOf { name -> states[name]?.totalBytesToDownload() ?: 0L }
+                val label = if (total > 0L) {
+                    "Mengunduh plugin ${bytes * 100 / total}%"
+                } else {
+                    "Mengunduh plugin"
+                }
+                onStatus?.invoke(label)
+                Log.d(TAG, "Waiting for asset packs: $pending ($label)")
+            }
+            if (!sleepBriefly()) return false
         }
         Log.e(TAG, "Timed out waiting for fast-follow asset packs")
+        return false
+    }
+
+    private fun showPlayDialog(show: (Activity) -> Task<Int?>?) {
+        val activity = hostActivity?.get() ?: return
+        if (activity.isFinishing || activity.isDestroyed) return
+        activity.runOnUiThread {
+            try {
+                show(activity)?.addOnFailureListener { error ->
+                    Log.w(TAG, "Play dialog: ${error.message}")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Play dialog: ${e.message}")
+            }
+        }
+    }
+
+    private fun showCellularConfirmation(manager: AssetPackManager) {
+        val activity = hostActivity?.get() ?: return
+        val launcher = cellularLauncher ?: return
+        if (activity.isFinishing || activity.isDestroyed) return
+        activity.runOnUiThread {
+            try {
+                manager.showCellularDataConfirmation(launcher)
+            } catch (e: Exception) {
+                Log.w(TAG, "Cellular dialog: ${e.message}")
+            }
+        }
+    }
+
+    private fun sleepBriefly(millis: Long = 1000): Boolean =
+        try {
+            Thread.sleep(millis)
+            true
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            false
+        }
+
+    private fun skipFully(input: InputStream, bytes: Long) {
+        var left = bytes
+        while (left > 0) {
+            val skipped = input.skip(left)
+            if (skipped > 0) {
+                left -= skipped
+                continue
+            }
+            if (input.read() < 0) return
+            left--
+        }
+    }
+
+    private class BoundedInputStream(
+        private val source: InputStream,
+        private var remaining: Long
+    ) : InputStream() {
+        override fun read(): Int {
+            if (remaining <= 0L) return -1
+            val value = source.read()
+            if (value >= 0) remaining--
+            return value
+        }
+
+        override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+            if (remaining <= 0L) return -1
+            val count = source.read(buffer, offset, minOf(length.toLong(), remaining).toInt())
+            if (count > 0) remaining -= count
+            return count
+        }
+
+        override fun close() {
+            source.close()
+        }
     }
 
     private fun preloadDspPlugins(pluginDir: File, assetNames: List<String>) {

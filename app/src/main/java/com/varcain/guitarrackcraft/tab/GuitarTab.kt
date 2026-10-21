@@ -121,7 +121,7 @@ fun guitarTabPrompt(presetName: String, part: String = ""): String {
         "Tulis hanya bagian \"$section\". Jangan menulis bagian lain."
     }
     return """
-        Tuliskan tab gitar lagu "$name" untuk aplikasi NadaRak.
+        Tuliskan tab gitar lagu "$name" untuk aplikasi GitarRak.
         Balas HANYA satu objek JSON. Jangan Markdown, jangan blok kode, jangan penjelasan.
         $partRule
         Ikuti nada dan ritme lagu itu. Jangan menggubah riff baru, jangan mengganti dengan pola yang mirip, jangan menambah nada supaya tab terlihat panjang.

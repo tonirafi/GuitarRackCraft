@@ -152,7 +152,10 @@ class RackViewModel(application: Application) : AndroidViewModel(application) {
             var sampleCount = 0
             while (true) {
                 if (_isEngineRunning.value) {
-                    try {
+                    if (!AudioEngine.isRunning()) {
+                        stopRecording()
+                        _isEngineRunning.value = false
+                    } else try {
                         _inputLevel.value = AudioEngine.getInputLevel()
                         _outputLevel.value = AudioEngine.getOutputLevel()
                         _inputClipping.value = AudioEngine.isInputClipping()

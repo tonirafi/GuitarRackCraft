@@ -1,41 +1,53 @@
-NadaRak — teks Play Store (Bahasa Indonesia)
-Judul, deskripsi, ikon, dan feature graphic sudah diunggah ke Play Console.
-AAB belum masuk track: API menolak commit karena paket aset.
+GitarRak — teks Play Store (Bahasa Indonesia)
+Judul, deskripsi, ikon, feature graphic, dan Data safety sudah diunggah.
+Track produksi masih kosong. Rilis internal: 1.0.0 (8).
 
 Paket Play Store
 com.gdt.nadarak
 
 Judul (maks. 30)
-NadaRak: Efek Gitar
+GitarRak: Efek Gitar
 
 Deskripsi singkat (maks. 80)
 Rantai efek gitar, preset, dan tab latihan di satu aplikasi.
 
 Deskripsi lengkap
-NadaRak menyusun efek gitar di ponsel: amplifier, distorsi, equalizer, delay, reverb, dan plugin lain yang terpasang di perangkat.
+GitarRak menyusun rantai efek gitar di ponsel. Amplifier, distorsi, equalizer, delay, reverb, dan plugin lain diunduh dari Play, lalu dipasang di perangkat.
 
 Yang bisa dilakukan
-• Susun rantai efek dan simpan sebagai preset
-• Tambah nada dengan menempel hasil ChatGPT, lalu pasang sekali ke rack
+• Susun rantai efek, simpan sebagai preset, lalu panggil lagi
+• Efek tetap berbunyi saat layar kunci atau aplikasi berada di belakang
+• Tempel hasil ChatGPT untuk menambah nada, lalu pasang sekali ke rack
+• Minta tab latihan, simpan, lalu mainkan lewat efek yang sedang terpasang
 • Cari preset dan tab yang sudah disimpan
-• Minta tab latihan ke ChatGPT, simpan, lalu mainkan lewat efek yang sedang terpasang
-• Rekam permainan
+• Rekam permainan ke file di ponsel
+• Unduh ulang plugin dari pengaturan audio jika paket belum lengkap
 
-Nada dan tab dari ChatGPT adalah perkiraan latihan. Bukan setelan studio asli dan bukan tab resmi sebuah lagu.
+Suara gitar diproses di ponsel. Rekaman, preset, dan tab tidak dikirim ke server GitarRak.
+
+Pencarian referensi mengirim teks yang Anda ketik ke Wikipedia. Layanan AI dan TONE3000 hanya dipakai jika Anda mengaturnya sendiri. Nada dan tab dari ChatGPT adalah perkiraan latihan, bukan setelan studio dan bukan tab resmi sebuah lagu.
 
 Aplikasi ini perangkat lunak bebas di bawah GPL-3.0.
 
-Kategori
-Musik dan audio
+Kebijakan privasi: https://gutekno.com/kebijakan-privasi-nadarak
 
-Grafis yang sudah disiapkan
-• Ikon Play Store 512×512: store/play/icon-512.png
-• Feature graphic 1024×500: store/play/feature-1024x500.png
-• Nama di launcher: NadaRak
+Kontak Play
+guteknoinovasi@gmail.com
+https://gutekno.com
 
-Kebijakan privasi
-https://gutekno.com/kebijakan-privasi-nadarak
+Data safety
+Sudah dikirim. Deklarasi: tidak ada akun GitarRak. Data yang keluar dari ponsel hanya jika fitur itu dipakai: teks pencarian ke Wikipedia, permintaan AI ke alamat yang diisi pengguna, dan token TONE3000. Mikrofon, rekaman, preset, dan tab tidak dikirim. Enkripsi dalam perjalanan dijawab tidak selalu, karena alamat AI boleh http. Berkas: store/play/data-safety.csv
 
-Masih perlu sebelum unggah
-• Minimal 2 screenshot ponsel (bukan mockup)
-• Isi Data safety di Play Console sesuai akses mikrofon, penyimpanan, dan jaringan
+Grafis yang sudah di Play
+• Ikon 512×512: gitar listrik, latar krem hangat
+• Feature graphic 1024×500: gitar yang sama, latar krem, judul GitarRak
+• Ikon peluncur di proyek sudah diganti. Ikon di ponsel berubah pada rilis berikutnya.
+• Screenshot ponsel: belum ada
+
+Masih diisi di Play Console sebelum produksi
+• Minimal 2 screenshot ponsel dari aplikasi yang terpasang, PNG atau JPEG tanpa transparansi, rasio 9:16
+• App content → Privacy policy: https://gutekno.com/kebijakan-privasi-nadarak
+• Content rating
+• Ads: No
+• Target audience: 13 tahun ke atas
+• App access: tidak perlu login untuk fitur utama

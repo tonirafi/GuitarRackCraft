@@ -51,7 +51,13 @@ object EngineInitHelper {
 
         // For playstore flavor: extract plugin .so from PAD packs before init
         if (BuildConfig.USE_ASSET_PACKS) {
-            PluginAssetExtractor.ensurePluginsExtracted(context, onExtractionProgress, onStatus)
+            val pluginsOk = PluginAssetExtractor.ensurePluginsExtracted(
+                context, onExtractionProgress, onStatus
+            )
+            if (!pluginsOk) {
+                Log.e(TAG, "Plugin packs are not ready")
+                return false
+            }
             val pluginDir = PluginAssetExtractor.getPluginDir(context)
             engine.nativeSetPluginLibDir(pluginDir.absolutePath)
             Log.d(TAG, "Plugin lib dir (PAD): ${pluginDir.absolutePath}")

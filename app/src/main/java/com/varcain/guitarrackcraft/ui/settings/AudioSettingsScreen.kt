@@ -27,18 +27,28 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import com.varcain.guitarrackcraft.BuildConfig
 import com.varcain.guitarrackcraft.engine.AudioDeviceOption
 import com.varcain.guitarrackcraft.engine.AudioEngine
 import com.varcain.guitarrackcraft.engine.AudioSettingsManager
+import com.varcain.guitarrackcraft.engine.PluginAssetExtractor
 import com.varcain.guitarrackcraft.ui.rack.RackViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.Intent
+import kotlin.system.exitProcess
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -121,6 +131,10 @@ fun AudioSettingsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
+            if (BuildConfig.USE_ASSET_PACKS) {
+                PluginRedownloadSection(viewModel)
+            }
+
             // Current engine info + low-latency checklist
             val isRunning by viewModel.isEngineRunning.collectAsState()
             if (isRunning) {
@@ -164,6 +178,102 @@ fun AudioSettingsScreen(
             }
         }
     }
+}
+
+@Composable
+private fun PluginRedownloadSection(viewModel: RackViewModel) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var confirm by remember { mutableStateOf(false) }
+    var working by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf("") }
+
+    Divider()
+    Text(
+        text = "Plugin",
+        style = MaterialTheme.typography.labelLarge
+    )
+    Text(
+        text = "Jika plugin tidak muncul atau unduhan terhenti, hapus salinan di ponsel lalu unduh lagi dari Play. Aplikasi akan dibuka ulang setelah selesai.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Button(
+        onClick = { confirm = true },
+        enabled = !working,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(if (working) "Mengunduh plugin" else "Unduh ulang plugin")
+    }
+    if (message.isNotEmpty()) {
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+    if (working) {
+        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+    }
+    if (confirm) {
+        AlertDialog(
+            onDismissRequest = { if (!working) confirm = false },
+            title = { Text("Unduh ulang plugin") },
+            text = {
+                Text("File plugin di ponsel dihapus, lalu diunduh lagi. GitarRak dibuka ulang setelah selesai.")
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !working,
+                    onClick = {
+                        confirm = false
+                        working = true
+                        message = "Menghapus plugin lama"
+                        scope.launch {
+                            viewModel.stopEngine()
+                            val ok = withContext(Dispatchers.IO) {
+                                PluginAssetExtractor.redownloadPlugins(
+                                    context.applicationContext,
+                                    onStatus = { message = it }
+                                )
+                            }
+                            if (ok) {
+                                message = "Plugin selesai. Membuka ulang GitarRak"
+                                restartApp(context)
+                            } else {
+                                working = false
+                                if (message.isBlank()) {
+                                    message = "Unduhan gagal. Periksa koneksi, lalu coba lagi."
+                                }
+                            }
+                        }
+                    }
+                ) {
+                    Text("Unduh ulang")
+                }
+            },
+            dismissButton = {
+                TextButton(enabled = !working, onClick = { confirm = false }) {
+                    Text("Batal")
+                }
+            }
+        )
+    }
+}
+
+private fun restartApp(context: Context) {
+    val activity = context.findActivity() ?: return
+    val launch = activity.packageManager.getLaunchIntentForPackage(activity.packageName) ?: return
+    launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+    activity.startActivity(launch)
+    activity.finishAffinity()
+    exitProcess(0)
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 @Composable

@@ -21,6 +21,7 @@ package com.varcain.guitarrackcraft
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -42,7 +43,9 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import com.varcain.guitarrackcraft.debug.DebugHooks
 import com.varcain.guitarrackcraft.engine.AudioEngine
+import com.varcain.guitarrackcraft.engine.EffectKeepAliveService
 import com.varcain.guitarrackcraft.engine.EngineInitHelper
+import com.varcain.guitarrackcraft.engine.PluginAssetExtractor
 import com.varcain.guitarrackcraft.ui.loading.PluginExtractScreen
 import com.varcain.guitarrackcraft.ui.navigation.AppNavigation
 import com.varcain.guitarrackcraft.ui.theme.GuitarRackCraftTheme
@@ -58,9 +61,10 @@ import java.io.InputStream
 class MainActivity : ComponentActivity() {
 
     private var engineReady by mutableStateOf(false)
+    private var extractFailed by mutableStateOf(false)
     private var extractedCount by mutableIntStateOf(0)
     private var extractTotalCount by mutableIntStateOf(0)
-    private var initStatus by mutableStateOf("Menyiapkan NadaRak")
+    private var initStatus by mutableStateOf("Menyiapkan GitarRak")
 
     override fun onNewIntent(intent: android.content.Intent?) {
         super.onNewIntent(intent)
@@ -90,15 +94,37 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val cellularConfirmationLauncher = registerForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { }
+
     private val requestPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        android.util.Log.d("MainActivity", "RECORD_AUDIO permission result: granted=$granted")
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        android.util.Log.d("MainActivity", "permission result: $result")
+        if (AudioEngine.isRunning()) EffectKeepAliveService.sync(true)
+    }
+
+    private fun requestNeededPermissions() {
+        val needed = mutableListOf<String>()
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            needed += Manifest.permission.RECORD_AUDIO
+        }
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            needed += Manifest.permission.POST_NOTIFICATIONS
+        }
+        if (needed.isNotEmpty()) {
+            requestPermissionLauncher.launch(needed.toTypedArray())
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        EffectKeepAliveService.install(this)
+        PluginAssetExtractor.attach(this, cellularConfirmationLauncher)
 
         // Handle auth callback if activity started via deep link
         handleAuthIntent(intent)
@@ -113,11 +139,7 @@ class MainActivity : ComponentActivity() {
         // Initialize engine asynchronously. For playstore flavor, plugin .so extraction
         // may take 15-30s on first launch; show a progress screen in the meantime.
         lifecycleScope.launch {
-            withContext(Dispatchers.IO) {
-                prepareLv2AndInitEngine()
-            }
-            engineReady = true
-            DebugHooks.onEngineReady(this@MainActivity)
+            startEnginePrepare()
         }
 
         setContent {
@@ -132,7 +154,9 @@ class MainActivity : ComponentActivity() {
                         PluginExtractScreen(
                             extracted = extractedCount.takeIf { extractTotalCount > 0 },
                             total = extractTotalCount.takeIf { extractTotalCount > 0 },
-                            status = initStatus
+                            status = initStatus,
+                            failed = extractFailed,
+                            onRetry = { lifecycleScope.launch { startEnginePrepare() } }
                         )
                     }
                 }
@@ -247,9 +271,25 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun prepareLv2AndInitEngine() {
+    private suspend fun startEnginePrepare() {
+        extractFailed = false
+        extractedCount = 0
+        extractTotalCount = 0
+        initStatus = "Menyiapkan GitarRak"
+        val ok = withContext(Dispatchers.IO) {
+            prepareLv2AndInitEngine()
+        }
+        if (ok) {
+            engineReady = true
+            DebugHooks.onEngineReady(this)
+        } else {
+            extractFailed = true
+        }
+    }
+
+    private fun prepareLv2AndInitEngine(): Boolean {
         extractLV2Assets()
-        EngineInitHelper.initEngine(
+        return EngineInitHelper.initEngine(
             this,
             onExtractionProgress = { extracted, total ->
                 extractedCount = extracted
@@ -261,9 +301,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            android.util.Log.d("MainActivity", "RECORD_AUDIO not granted, requesting...")
-            requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED ||
+            (Build.VERSION.SDK_INT >= 33 &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+        ) {
+            android.util.Log.d("MainActivity", "requesting mic and notification permission")
+            requestNeededPermissions()
         }
     }
 

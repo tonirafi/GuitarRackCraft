@@ -18,5 +18,10 @@
   along with Guitar RackCraft. If not, see <https://www.gnu.org/licenses/>.
 -->
 <resources>
-    <string name="app_name">NadaRak</string>
+    <string name="app_name">GitarRak</string>
+    <string name="splash_preparing">Menyiapkan GitarRak</string>
+    <string name="effect_channel_name">Efek gitar</string>
+    <string name="effect_notification_title">GitarRak</string>
+    <string name="effect_notification_text">Efek menyala. Tetap jalan saat layar kunci.</string>
+    <string name="effect_notification_stop">Matikan</string>
 </resources>
