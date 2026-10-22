@@ -79,6 +79,11 @@ class PresetManager(private val engine: NativeEngine) {
      * Load a preset by name: reads the file and delegates to [loadPresetFromJson].
      * @return true if all plugins restored successfully.
      */
+    fun readPresetJson(context: Context, name: String): String? {
+        val file = File(presetsDir(context), "$name.json")
+        return if (file.isFile) file.readText() else null
+    }
+
     fun loadPreset(context: Context, name: String): Boolean {
         val file = File(presetsDir(context), "$name.json")
         if (!file.exists()) {

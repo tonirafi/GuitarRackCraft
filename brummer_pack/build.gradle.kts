@@ -21,9 +21,16 @@ plugins {
     id("com.android.asset-pack")
 }
 
+val stagePackImages = tasks.register<Copy>("stagePackImages") {
+    from(rootProject.file("app/src/main/assets")) {
+        include("lv2/modgui_shared_resources/**/*.png")
+    }
+    into(layout.projectDirectory.dir("src/main/assets"))
+}
+
 assetPack {
     packName.set("brummer_pack")
     dynamicDelivery {
-        deliveryType.set("fast-follow")
+        deliveryType.set("on-demand")
     }
 }

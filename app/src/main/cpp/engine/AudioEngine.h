@@ -75,9 +75,8 @@ public:
     uint32_t getCallbackFrameCount() const { return callbackFrameCount_; }
 
     /**
-     * Opt in to dropping the mic FIFO head start at engine start. Off by
-     * default: it trades part of the input cushion for a shorter pluck-to-amp
-     * delay. Takes effect on the next start.
+     * Drop the mic FIFO head start at engine start. On by default. Takes effect
+     * on the next start. Turn it off if a device stutters.
      */
     void setInputShedEnabled(bool enabled) { inputShedEnabled_.store(enabled); }
     bool isInputShedEnabled() const { return inputShedEnabled_.load(); }
@@ -212,7 +211,7 @@ private:
     enum class InputStage { Drain, Cushion, Settle, Live };
 
     std::atomic<bool>    inputRestartPrime_{false};
-    std::atomic<bool>    inputShedEnabled_{false};
+    std::atomic<bool>    inputShedEnabled_{true};
     std::atomic<int32_t> inputStartupBacklogFrames_{0};
     std::atomic<int32_t> inputQueueFrames_{0};
     std::atomic<int32_t> inputUnderrunCount_{0};

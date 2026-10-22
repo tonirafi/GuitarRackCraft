@@ -312,7 +312,10 @@ int LV2PluginFactory::rewriteGuiextBinaryPaths(const std::string& bundleDir) {
 
                 if (access(nativeLibPath.c_str(), F_OK) == 0) {
                     resolvedPath = nativeLibPath;
-                } else if (!pluginLibPath.empty() && access(pluginLibPath.c_str(), F_OK) == 0) {
+                } else if (!pluginLibPath.empty()) {
+                    // Record the path even when the on-demand pack is not
+                    // downloaded yet. Lilv keeps this URI, and dlopen succeeds
+                    // once the file is copied there.
                     resolvedPath = pluginLibPath;
                 } else {
                     searchPos = gt + 1;
@@ -406,15 +409,15 @@ void LV2PluginFactory::rewriteManifestPaths(const std::string& basePath) {
                 std::string pluginLibPath = pluginLibDir_.empty() ? std::string() : (pluginLibDir_ + "/lib" + soName);
                 std::string bundleSoPath = fullPath + "/" + soName;
 
-                // Search order: nativeLibDir (full flavor) → pluginLibDir (PAD) → bundle
+                // Search order: nativeLibDir (full flavor) → pluginLibDir (PAD) → bundle.
+                // The PAD path is written even if the pack is not on disk yet.
                 std::string binaryUriValue;
                 bool haveInLibDir = (access(nativeLibPath.c_str(), F_OK) == 0);
-                bool haveInPluginDir = (!pluginLibPath.empty() && access(pluginLibPath.c_str(), F_OK) == 0);
                 bool haveInBundle = (access(bundleSoPath.c_str(), F_OK) == 0);
 
                 if (haveInLibDir) {
                     binaryUriValue = "file://" + nativeLibPath;
-                } else if (haveInPluginDir) {
+                } else if (!pluginLibPath.empty()) {
                     binaryUriValue = "file://" + pluginLibPath;
                 } else if (haveInBundle) {
                     binaryUriValue = "file://" + bundleSoPath;

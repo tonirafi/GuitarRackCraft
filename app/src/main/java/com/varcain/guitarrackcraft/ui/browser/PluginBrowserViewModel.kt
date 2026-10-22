@@ -436,6 +436,7 @@ class PluginBrowserViewModel(application: Application) : AndroidViewModel(applic
 
     suspend fun addPluginToRack(plugin: PluginInfo, position: Int = -1): Boolean {
         if (_blockingOperation.value != null) return false
+        if (!pluginPackReady(plugin.id)) return false
         return withBlockingOperation("Adding plugin") {
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 // Off the main thread because for VST plugins, RackManager.addPlugin
@@ -464,6 +465,7 @@ class PluginBrowserViewModel(application: Application) : AndroidViewModel(applic
 
     suspend fun replacePluginInRack(position: Int, plugin: PluginInfo): Boolean {
         if (_blockingOperation.value != null) return false
+        if (!pluginPackReady(plugin.id)) return false
         return withBlockingOperation("Replacing plugin") {
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 // Same off-main-thread reason as addPluginToRack — VST replace
@@ -486,6 +488,16 @@ class PluginBrowserViewModel(application: Application) : AndroidViewModel(applic
                 }
             }
         }
+    }
+
+    private suspend fun pluginPackReady(pluginId: String): Boolean {
+        val result = com.varcain.guitarrackcraft.ui.loading.PluginPackGate.ensureForUris(
+            appContext, listOf(pluginId)
+        )
+        if (result is com.varcain.guitarrackcraft.ui.loading.PluginPackGate.Result.Failed) {
+            _addFailureMessage.value = result.message
+        }
+        return result is com.varcain.guitarrackcraft.ui.loading.PluginPackGate.Result.Ready
     }
 
     fun clearAddFailureMessage() {

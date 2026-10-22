@@ -72,11 +72,11 @@ object AudioSettingsManager {
     }
 
     /**
-     * Off by default. Trades part of the mic cushion for a shorter pluck-to-amp
-     * delay, so it can stutter on some devices.
+     * On by default. Drops the mic FIFO head start at engine start. Turn it off
+     * if a device stutters; the cushion still grows on its own while it is on.
      */
     fun getShortenInputDelay(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_SHORTEN_INPUT_DELAY, false)
+        prefs(context).getBoolean(KEY_SHORTEN_INPUT_DELAY, true)
 
     fun setShortenInputDelay(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_SHORTEN_INPUT_DELAY, enabled).apply()

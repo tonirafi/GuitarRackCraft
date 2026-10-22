@@ -342,6 +342,43 @@ do_stage() {
     echo "  main: ${#core[@]} core libs; full overlay: ${#plugins[@]} plugin libs"
     echo "  packs: gxplugins ${#gx[@]}, neural ${#neural[@]}, brummer ${#brummer[@]} (plugin_libs.txt)"
 
+    # URI → pack index so the app can fetch one on-demand pack when that effect is used.
+    python3 - "$PROJECT_ROOT" << 'PY' | write_if_changed "$PROJECT_ROOT/app/src/playstore/assets/plugin_pack_index.txt"
+import os, re, sys
+root = sys.argv[1]
+pack_names = ("gxplugins_pack", "neural_pack", "brummer_pack")
+lib_to_pack = {}
+sizes = {}
+for pack in pack_names:
+    directory = os.path.join(root, pack, "src/main/assets/plugins/arm64-v8a")
+    total = 0
+    if os.path.isdir(directory):
+        for name in sorted(os.listdir(directory)):
+            if not name.endswith(".so"):
+                continue
+            lib_to_pack[name] = pack
+            total += os.path.getsize(os.path.join(directory, name))
+            print(f"F\t{pack}\t{name}")
+    sizes[pack] = total
+for pack in pack_names:
+    print(f"S\t{pack}\t{sizes[pack]}")
+pattern = re.compile(r"<([^>\s]+)>\s+a\s+lv2:Plugin\s*;\s*lv2:binary\s+<([^>]+)>", re.S)
+lv2 = os.path.join(root, "app/src/main/assets/lv2")
+seen = set()
+if os.path.isdir(lv2):
+    for dirpath, _, filenames in os.walk(lv2):
+        if "manifest.ttl" not in filenames:
+            continue
+        text = open(os.path.join(dirpath, "manifest.ttl"), encoding="utf-8", errors="replace").read()
+        for uri, so in pattern.findall(text):
+            lib = so if so.startswith("lib") else "lib" + so
+            pack = lib_to_pack.get(lib)
+            if not pack or uri in seen:
+                continue
+            seen.add(uri)
+            print(f"P\t{uri}\t{pack}")
+PY
+
     # Generate LV2 asset manifests (all flavors).
     # assets.list() is unreliable across split APKs; extractLV2Assets() reads these instead.
     local assets="$PROJECT_ROOT/app/src/main/assets"

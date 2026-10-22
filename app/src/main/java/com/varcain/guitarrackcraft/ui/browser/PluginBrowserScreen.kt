@@ -394,7 +394,13 @@ fun PluginThumbnail(
         value = withContext(Dispatchers.IO) {
             try {
                 if (thumbnailPath.isNotEmpty()) {
-                    context.assets.open("lv2/$thumbnailPath").use { inputStream ->
+                    val extracted = java.io.File(context.filesDir, "lv2/$thumbnailPath")
+                    val stream = if (extracted.isFile) {
+                        extracted.inputStream()
+                    } else {
+                        context.assets.open("lv2/$thumbnailPath")
+                    }
+                    stream.use { inputStream ->
                         BitmapFactory.decodeStream(inputStream)?.asImageBitmap()
                     }
                 } else {

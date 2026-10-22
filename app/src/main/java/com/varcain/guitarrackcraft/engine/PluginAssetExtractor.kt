@@ -36,12 +36,14 @@ import java.lang.ref.WeakReference
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Extracts plugin .so files from Play Asset Delivery fast-follow packs to a
- * dlopen-able directory on first launch (or after app update).
+ * Extracts plugin .so files from Play Asset Delivery on-demand packs to a
+ * dlopen-able directory.
  *
- * Fast-follow packs are not split APKs (install-time packs are, and Play then
- * reads their missing targetSdk as 1). After the pack download finishes, files
- * are read from the pack location. A copy that is already in the base
+ * The packs are not part of the Play Store install. A pack is fetched only
+ * when an effect that lives in it is used, and Play shows its own confirmation
+ * for the large download. Install-time packs are split APKs with no
+ * targetSdk, which Play reads as 1, so they are not used. Files are read from
+ * the pack location after the download. A copy that is already in the base
  * AssetManager is used first. Plugin .so files live under "plugins/arm64-v8a/".
  *
  * A build-time manifest (plugin_libs.txt) lists all plugin .so filenames so
@@ -56,6 +58,7 @@ object PluginAssetExtractor {
     private const val TAG = "PluginAssetExtractor"
     private const val PLUGINS_ASSET_DIR = "plugins/arm64-v8a"
     private const val MANIFEST_FILE = "plugin_libs.txt"
+    private const val PACK_INDEX_FILE = "plugin_pack_index.txt"
     private const val VERSION_STAMP_FILE = ".version_code"
     private val PACK_NAMES = listOf("gxplugins_pack", "neural_pack", "brummer_pack")
     private const val PACK_WAIT_MS = 15 * 60 * 1000L
@@ -124,7 +127,7 @@ object PluginAssetExtractor {
         onProgress: ((extracted: Int, total: Int) -> Unit)? = null,
         onStatus: ((String) -> Unit)? = null
     ): Boolean = synchronized(extractLock) {
-        extractPlugins(context, force = false, onProgress, onStatus)
+        extractPlugins(context, force = false, fetchMissing = false, onProgress, onStatus)
     }
 
     /**
@@ -152,12 +155,70 @@ object PluginAssetExtractor {
                 }
             }
         }
-        extractPlugins(context, force = true, onProgress, onStatus)
+        extractPlugins(context, force = true, fetchMissing = true, onProgress, onStatus)
+    }
+
+    /** Pack that holds this LV2 URI, or null when the effect is not in a pack. */
+    fun packForUri(context: Context, uri: String): String? {
+        val bare = uri.removePrefix("LV2:")
+        return packIndex(context).packByUri[bare]
+    }
+
+    fun packLabel(pack: String): String = when (pack) {
+        "gxplugins_pack" -> "GxPlugins"
+        "neural_pack" -> "Neural"
+        "brummer_pack" -> "Amplifier Brummer"
+        else -> pack
+    }
+
+    fun packSizeBytes(context: Context, pack: String): Long =
+        packIndex(context).sizeByPack[pack] ?: 0L
+
+    /** True when every library from this pack is already copied. */
+    fun isPackReady(context: Context, pack: String): Boolean {
+        val names = packIndex(context).filesByPack[pack].orEmpty()
+        if (names.isEmpty()) return true
+        val dir = getPluginDir(context)
+        return names.all { name ->
+            val file = File(dir, name)
+            file.isFile && file.length() > 0L
+        }
+    }
+
+    /**
+     * Fetches one on-demand pack, copies its libraries, and loads them.
+     * Play's confirmation dialog is shown when the download needs it.
+     */
+    fun downloadPack(
+        context: Context,
+        pack: String,
+        onStatus: ((String) -> Unit)? = null
+    ): Boolean = synchronized(extractLock) {
+        if (isPackReady(context, pack)) return true
+        onStatus?.invoke("Mengunduh paket ${packLabel(pack)}")
+        if (!awaitPacks(context, listOf(pack), onStatus)) return false
+        val names = packIndex(context).filesByPack[pack].orEmpty()
+        if (!copyPluginFiles(context, names, force = true, onProgress = null, onStatus)) {
+            return false
+        }
+        copyPackImages(context, pack)
+        loadLibraries(names.map { File(getPluginDir(context), it) })
+        true
+    }
+
+    /** Copies pedal artwork from every pack already on the device. */
+    fun copyInstalledPackImages(context: Context) {
+        for (pack in PACK_NAMES) {
+            if (isPackReady(context, pack) || packIsCompleted(context, pack)) {
+                copyPackImages(context, pack)
+            }
+        }
     }
 
     private fun extractPlugins(
         context: Context,
         force: Boolean,
+        fetchMissing: Boolean,
         onProgress: ((extracted: Int, total: Int) -> Unit)?,
         onStatus: ((String) -> Unit)?
     ): Boolean {
@@ -200,57 +261,21 @@ object PluginAssetExtractor {
         }
 
         if (needsExtraction) {
-            if (!pluginsInBaseAssets(context, assetNames.first())) {
-                onStatus?.invoke("Mengunduh plugin")
-                val packsReady = awaitFastFollowPacks(context, onStatus)
-                if (!packsReady) {
-                    onStatus?.invoke("Unduhan plugin gagal. Periksa koneksi, lalu coba lagi.")
-                    return false
-                }
+            val names = pluginNamesToCopy(context, assetNames, fetchMissing, onStatus)
+                ?: return false
+            if (names.isEmpty()) {
+                Log.d(TAG, "No plugin packs on disk yet; the app opens without them")
+            } else if (!copyPluginFiles(context, names, force, onProgress, onStatus)) {
+                if (fetchMissing) return false
             }
-            onStatus?.invoke("Menyalin plugin")
-            Log.d(TAG, "Extracting ${assetNames.size} plugin .so files...")
-            val total = assetNames.size
-            var extracted = 0
-
-            for (name in assetNames) {
-                val dest = File(pluginDir, name)
-                try {
-                    val expected = packedSize(context, name)
-                    if (!force && dest.isFile && dest.length() > 0L &&
-                        (expected <= 0L || dest.length() == expected)
-                    ) {
-                        extracted++
-                        onProgress?.invoke(extracted, total)
-                        continue
-                    }
-                    if (dest.exists()) dest.delete()
-                    openPlugin(context, name).use { input ->
-                        dest.outputStream().use { output ->
-                            input.copyTo(output, COPY_BUFFER)
-                        }
-                    }
-                    if (expected > 0L && dest.length() != expected) {
-                        dest.delete()
-                        Log.e(TAG, "Size mismatch for $name: ${dest.length()} != $expected")
-                        continue
-                    }
-                    if (!dest.isFile || dest.length() <= 0L) continue
-                    extracted++
-                    onProgress?.invoke(extracted, total)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to extract $name: ${e.message}")
-                }
-            }
-
-            if (extracted != total) {
+            val onDisk = assetNames.count { File(pluginDir, it).isFile }
+            if (onDisk == assetNames.size) {
+                stampFile.writeText("$currentVersion:$onDisk")
+                Log.d(TAG, "Extraction complete: $onDisk/${assetNames.size} plugins")
+            } else {
                 stampFile.delete()
-                Log.e(TAG, "Extraction incomplete: $extracted/$total")
-                onStatus?.invoke("Plugin belum lengkap ($extracted/$total). Coba lagi.")
-                return false
+                Log.d(TAG, "Plugin packs on disk: $onDisk/${assetNames.size}")
             }
-            stampFile.writeText("$currentVersion:$extracted")
-            Log.d(TAG, "Extraction complete: $extracted/$total plugins")
         }
 
         // DSP libraries are loaded after the first screen is up. Native
@@ -372,12 +397,170 @@ object PluginAssetExtractor {
         return null
     }
 
-    /** Blocks until every fast-follow pack is on disk, or the wait expires. */
-    private fun awaitFastFollowPacks(context: Context, onStatus: ((String) -> Unit)?): Boolean {
+    private data class PackIndex(
+        val filesByPack: Map<String, List<String>>,
+        val fileToPack: Map<String, String>,
+        val packByUri: Map<String, String>,
+        val sizeByPack: Map<String, Long>
+    )
+
+    @Volatile private var indexCache: PackIndex? = null
+
+    private fun packIndex(context: Context): PackIndex {
+        indexCache?.let { return it }
+        val filesByPack = mutableMapOf<String, MutableList<String>>()
+        val fileToPack = mutableMapOf<String, String>()
+        val packByUri = mutableMapOf<String, String>()
+        val sizeByPack = mutableMapOf<String, Long>()
+        try {
+            context.assets.open(PACK_INDEX_FILE).bufferedReader().useLines { lines ->
+                for (line in lines) {
+                    val parts = line.split('\t')
+                    if (parts.size < 3) continue
+                    when (parts[0]) {
+                        "F" -> {
+                            filesByPack.getOrPut(parts[1]) { mutableListOf() }.add(parts[2])
+                            fileToPack[parts[2]] = parts[1]
+                        }
+                        "S" -> sizeByPack[parts[1]] = parts[2].toLongOrNull() ?: 0L
+                        "P" -> packByUri[parts[1]] = parts[2]
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "$PACK_INDEX_FILE missing: ${e.message}")
+        }
+        return PackIndex(filesByPack, fileToPack, packByUri, sizeByPack).also { indexCache = it }
+    }
+
+    private fun pluginNamesToCopy(
+        context: Context,
+        assetNames: List<String>,
+        fetchMissing: Boolean,
+        onStatus: ((String) -> Unit)?
+    ): List<String>? {
+        if (pluginsInBaseAssets(context, assetNames.first())) return assetNames
+        if (fetchMissing) {
+            onStatus?.invoke("Mengunduh plugin")
+            if (!awaitPacks(context, PACK_NAMES, onStatus)) {
+                onStatus?.invoke("Unduhan plugin gagal. Periksa koneksi, lalu coba lagi.")
+                return null
+            }
+            return assetNames
+        }
+        val completed = completedPackNames(context)
+        return assetNames.filter { name ->
+            val pack = packIndex(context).fileToPack[name]
+            pack == null || pack in completed || File(getPluginDir(context), name).isFile
+        }
+    }
+
+    private fun packIsCompleted(context: Context, pack: String): Boolean =
+        pack in completedPackNames(context)
+
+    /**
+     * Pedal PNGs live in the on-demand pack, not the install. Copy the ones
+     * that arrived into the LV2 directory the UI already reads.
+     */
+    private fun copyPackImages(context: Context, pack: String) {
+        val manager = packManager(context) ?: return
+        val location = try {
+            manager.getPackLocation(pack)
+        } catch (e: Exception) {
+            Log.w(TAG, "getPackLocation $pack: ${e.message}")
+            null
+        } ?: return
+        val assetsRoot = location.assetsPath()?.let { File(it) }
+            ?: location.path()?.let { File(it, "assets") }
+            ?: return
+        val source = File(assetsRoot, "lv2")
+        if (!source.isDirectory) return
+        val destRoot = File(context.filesDir, "lv2")
+        var copied = 0
+        source.walkTopDown().filter { it.isFile }.forEach { file ->
+            val relative = source.toPath().relativize(file.toPath()).toString()
+            val dest = File(destRoot, relative)
+            if (dest.isFile && dest.length() == file.length()) return@forEach
+            dest.parentFile?.mkdirs()
+            file.copyTo(dest, overwrite = true)
+            copied++
+        }
+        if (copied > 0) Log.i(TAG, "Copied $copied images from $pack")
+    }
+
+    private fun completedPackNames(context: Context): Set<String> {
+        val manager = packManager(context) ?: return emptySet()
+        val states = try {
+            Tasks.await(manager.getPackStates(PACK_NAMES)).packStates()
+        } catch (e: Exception) {
+            Log.w(TAG, "Asset pack status failed: ${e.message}")
+            return emptySet()
+        }
+        return PACK_NAMES.filter { name ->
+            states[name]?.status() == AssetPackStatus.COMPLETED
+        }.toSet()
+    }
+
+    private fun copyPluginFiles(
+        context: Context,
+        names: List<String>,
+        force: Boolean,
+        onProgress: ((extracted: Int, total: Int) -> Unit)?,
+        onStatus: ((String) -> Unit)?
+    ): Boolean {
+        if (names.isEmpty()) return true
+        val pluginDir = getPluginDir(context)
+        pluginDir.mkdirs()
+        onStatus?.invoke("Menyalin plugin")
+        val total = names.size
+        var extracted = 0
+        for (name in names) {
+            val dest = File(pluginDir, name)
+            try {
+                val expected = packedSize(context, name)
+                if (!force && dest.isFile && dest.length() > 0L &&
+                    (expected <= 0L || dest.length() == expected)
+                ) {
+                    extracted++
+                    onProgress?.invoke(extracted, total)
+                    continue
+                }
+                if (dest.exists()) dest.delete()
+                openPlugin(context, name).use { input ->
+                    dest.outputStream().use { output ->
+                        input.copyTo(output, COPY_BUFFER)
+                    }
+                }
+                if (expected > 0L && dest.length() != expected) {
+                    dest.delete()
+                    Log.e(TAG, "Size mismatch for $name: ${dest.length()} != $expected")
+                    continue
+                }
+                if (!dest.isFile || dest.length() <= 0L) continue
+                extracted++
+                onProgress?.invoke(extracted, total)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to extract $name: ${e.message}")
+            }
+        }
+        if (extracted != total) {
+            Log.e(TAG, "Extraction incomplete: $extracted/$total")
+            onStatus?.invoke("Plugin belum lengkap ($extracted/$total). Coba lagi.")
+            return false
+        }
+        return true
+    }
+
+    /** Blocks until the requested on-demand packs are on disk, or the wait expires. */
+    private fun awaitPacks(
+        context: Context,
+        packs: List<String>,
+        onStatus: ((String) -> Unit)?
+    ): Boolean {
         val manager = packManager(context) ?: return false
         fun requestFetch() {
             try {
-                Tasks.await(manager.fetch(PACK_NAMES))
+                Tasks.await(manager.fetch(packs))
             } catch (e: Exception) {
                 Log.w(TAG, "Asset pack fetch failed: ${e.message}")
             }
@@ -389,18 +572,18 @@ object PluginAssetExtractor {
         val deadline = System.currentTimeMillis() + PACK_WAIT_MS
         while (System.currentTimeMillis() < deadline) {
             val states = try {
-                Tasks.await(manager.getPackStates(PACK_NAMES)).packStates()
+                Tasks.await(manager.getPackStates(packs)).packStates()
             } catch (e: Exception) {
                 Log.w(TAG, "Asset pack status failed: ${e.message}")
                 if (!sleepBriefly()) return false
                 continue
             }
-            val pending = PACK_NAMES.filter { name ->
+            val pending = packs.filter { name ->
                 val status = states[name]?.status() ?: AssetPackStatus.UNKNOWN
                 status != AssetPackStatus.COMPLETED
             }
             if (pending.isEmpty()) {
-                Log.d(TAG, "Fast-follow packs ready")
+                Log.d(TAG, "Asset packs ready: $packs")
                 return true
             }
             val failed = pending.filter { name ->
@@ -452,7 +635,7 @@ object PluginAssetExtractor {
             }
             if (!sleepBriefly()) return false
         }
-        Log.e(TAG, "Timed out waiting for fast-follow asset packs")
+        Log.e(TAG, "Timed out waiting for asset packs: $packs")
         return false
     }
 
@@ -529,19 +712,22 @@ object PluginAssetExtractor {
     }
 
     private fun preloadDspPlugins(pluginDir: File, assetNames: List<String>) {
-        var preloaded = 0
-        for (name in assetNames) {
-            if (name.contains("_ui.so")) continue
-            val dest = File(pluginDir, name)
-            if (dest.exists() && dest.length() > 0) {
-                try {
-                    System.load(dest.absolutePath)
-                    preloaded++
-                } catch (e: UnsatisfiedLinkError) {
-                    Log.w(TAG, "Pre-load skip $name: ${e.message}")
-                }
+        val loaded = loadLibraries(assetNames.map { File(pluginDir, it) })
+        Log.i(TAG, "Pre-loaded $loaded DSP plugins via System.load()")
+    }
+
+    private fun loadLibraries(files: List<File>): Int {
+        var loaded = 0
+        for (dest in files) {
+            if (dest.name.contains("_ui.so")) continue
+            if (!dest.isFile || dest.length() <= 0L) continue
+            try {
+                System.load(dest.absolutePath)
+                loaded++
+            } catch (e: UnsatisfiedLinkError) {
+                Log.w(TAG, "Pre-load skip ${dest.name}: ${e.message}")
             }
         }
-        Log.i(TAG, "Pre-loaded $preloaded DSP plugins via System.load()")
+        return loaded
     }
 }

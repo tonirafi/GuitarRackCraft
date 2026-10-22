@@ -144,10 +144,10 @@ fun AudioSettingsScreen(
                         style = MaterialTheme.typography.labelLarge
                     )
                     Text(
-                        text = "Buang antrean mikrofon yang menumpuk saat mesin dinyalakan, " +
-                            "lalu bangun ulang cadangan secukupnya. Sekitar seperlima detik " +
-                            "pertama sengaja dibikin senyap supaya prosesnya tidak terdengar. " +
-                            "Kalau suara sempat tersendat, cadangan ditambah sendiri.",
+                        text = "Nyala secara bawaan. Buang antrean mikrofon yang menumpuk saat " +
+                            "mesin dinyalakan, lalu bangun ulang cadangan secukupnya. " +
+                            "Kalau suara tersendat, cadangan ditambah sendiri. Matikan kalau " +
+                            "nadanya tetap pecah.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -235,7 +235,7 @@ private fun PluginRedownloadSection(viewModel: RackViewModel) {
         style = MaterialTheme.typography.labelLarge
     )
     Text(
-        text = "Jika plugin tidak muncul atau unduhan terhenti, hapus salinan di ponsel lalu unduh lagi dari Play. Aplikasi akan dibuka ulang setelah selesai.",
+        text = "Paket efek besar tidak ikut unduhan Play Store. Saat efek itu dipakai, muncul konfirmasi untuk mengunduh paketnya. Kalau unduhan terhenti, hapus salinan di ponsel lalu unduh lagi.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )

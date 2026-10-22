@@ -120,6 +120,9 @@ bundletool.jar
 neural_pack/src/main/assets/plugins/arm64-v8a/*.so
 gxplugins_pack/src/main/assets/plugins/arm64-v8a/*.so
 brummer_pack/src/main/assets/plugins/arm64-v8a/*.so
+neural_pack/src/main/assets/lv2/
+gxplugins_pack/src/main/assets/lv2/
+brummer_pack/src/main/assets/lv2/
 app/src/full/jniLibs/arm64-v8a/*.so
 app/src/playstore/assets/plugin_libs.txt
 

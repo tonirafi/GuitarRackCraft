@@ -24,7 +24,7 @@ Penyebab jeda di jalur asli: mikrofon mengantre sampel lama, lalu tiap callback 
 
 Mikrofon dibuka dan dijalankan lebih dulu, baru stream keluaran. Selama jeda itu mikrofon sudah merekam. Saat callback pertama membaca, antrean itu sudah berisi, dan karena setiap pembacaan mengambil sampel paling lama, kepala antrean itu dibawa terus sampai mesin dimatikan.
 
-### Sudah dipasang, tapi mati secara bawaan
+### Sudah dipasang, nyala secara bawaan
 
 `AudioEngine::serviceInputStartup()`, menyalin urutan resmi Oboe di `FullDuplexStream.h`. Selama urutan ini jalan, `inputBuffer_` diisi senyap, jadi rantai efek memproses diam dan tidak ada bunyi aneh yang sampai ke ampli:
 
@@ -37,7 +37,7 @@ Totalnya sekitar 40 callback, kira-kira 0,2 detik saat mesin start, jadi tidak t
 
 Bedanya dengan percobaan lama: cadangan tidak lagi ditebak dengan angka mati. Antrean dikosongkan lalu perangkat sendiri yang menentukan titik seimbangnya, dan kalau masih kurang, `noteInputUnderrun()` menambah satu callback cadangan tiap empat kali tersendat sampai maksimal empat, lalu mengulang tahap Cushion. Jadi kalau perangkatnya butuh cadangan lebih, dia menaikkannya sendiri tanpa perlu diutak-atik.
 
-Saklarnya: **Pengaturan audio → Pangkas jeda petikan**, bawaannya mati. Tersimpan di `audio_settings/shortenInputDelay`, dikirim ke mesin lewat `nativeSetInputShedEnabled` sebelum start, dan mengubahnya memicu restart mesin. Selama mati, jalur suara sama persis dengan kode 6 dan 8: `git diff` pada folder `cpp/` nol baris terhapus, jadi kode lama tidak tersentuh sama sekali.
+Saklarnya: **Pengaturan audio → Pangkas jeda petikan**, bawaannya nyala sejak perubahan ini. Tersimpan di `audio_settings/shortenInputDelay`, dikirim ke mesin lewat `nativeSetInputShedEnabled` sebelum start, dan mengubahnya memicu restart mesin. Ponsel yang sudah pernah mematikan saklarnya tetap mati, karena nilai itu tersimpan. Mematikannya mengembalikan jalur suara kode 6 dan 8.
 
 ### Batas yang tidak bisa dihilangkan
 

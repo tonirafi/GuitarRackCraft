@@ -344,7 +344,7 @@ class Tone3000ViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    private fun findOrAddCompatiblePlugin(fileInfo: ModelFileInfo): Int {
+    private suspend fun findOrAddCompatiblePlugin(fileInfo: ModelFileInfo): Int {
         val rackPlugins = RackManager.getRackPlugins()
         var targetPluginIndex = rackPlugins.indexOfFirst {
             when {
@@ -364,7 +364,14 @@ class Tone3000ViewModel(application: Application) : AndroidViewModel(application
             }
 
             if (pluginIdToAdd != null) {
-                targetPluginIndex = RackManager.addPlugin(pluginIdToAdd)
+                val packs = com.varcain.guitarrackcraft.ui.loading.PluginPackGate.ensureForUris(
+                    getApplication(), listOf(pluginIdToAdd)
+                )
+                if (packs is com.varcain.guitarrackcraft.ui.loading.PluginPackGate.Result.Ready) {
+                    targetPluginIndex = RackManager.addPlugin(pluginIdToAdd)
+                } else if (packs is com.varcain.guitarrackcraft.ui.loading.PluginPackGate.Result.Failed) {
+                    _error.value = packs.message
+                }
             }
         }
         return targetPluginIndex

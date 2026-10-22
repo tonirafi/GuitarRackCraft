@@ -245,6 +245,19 @@ class AiToneViewModel(app: Application) : AndroidViewModel(app) {
         val storedName = presetMenuName(presetName.ifBlank { plan.name })
         viewModelScope.launch {
             _state.update { it.copy(askApply = false, loading = true, error = null) }
+            when (val packs = com.varcain.guitarrackcraft.ui.loading.PluginPackGate.ensureForUris(
+                getApplication(), plan.effects.map { it.uri }
+            )) {
+                is com.varcain.guitarrackcraft.ui.loading.PluginPackGate.Result.Cancelled -> {
+                    _state.update { it.copy(loading = false, error = "Unduhan paket dibatalkan.") }
+                    return@launch
+                }
+                is com.varcain.guitarrackcraft.ui.loading.PluginPackGate.Result.Failed -> {
+                    _state.update { it.copy(loading = false, error = packs.message) }
+                    return@launch
+                }
+                is com.varcain.guitarrackcraft.ui.loading.PluginPackGate.Result.Ready -> Unit
+            }
             val result = withContext(Dispatchers.IO) { applier.apply(plan) }
             when (result) {
                 is ApplyResult.Applied -> {

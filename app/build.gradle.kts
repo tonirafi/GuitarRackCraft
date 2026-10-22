@@ -146,6 +146,32 @@ android {
 
     assetPacks += listOf(":gxplugins_pack", ":neural_pack", ":brummer_pack")
 
+    // The Play install stays small: pedal artwork is delivered in the
+    // on-demand packs and copied onto the device when that pack arrives.
+    tasks.matching {
+        it.name.startsWith("assetPackPlaystore") && it.name.endsWith("PreBundleTask")
+    }.configureEach {
+        dependsOn(
+            ":gxplugins_pack:stagePackImages",
+            ":neural_pack:stagePackImages",
+            ":brummer_pack:stagePackImages"
+        )
+        inputs.dir(rootProject.file("gxplugins_pack/src/main/assets/lv2"))
+        inputs.dir(rootProject.file("neural_pack/src/main/assets/lv2"))
+        inputs.dir(rootProject.file("brummer_pack/src/main/assets/lv2"))
+    }
+
+    tasks.matching {
+        it.name.startsWith("mergePlaystore") && it.name.endsWith("Assets")
+    }.configureEach {
+        doLast {
+            outputs.files.asFileTree.matching {
+                include("**/lv2/GxPlugins.lv2/**/*.png")
+                include("**/lv2/modgui_shared_resources/**/*.png")
+            }.forEach { png -> png.delete() }
+        }
+    }
+
     lint {
         checkReleaseBuilds = false
     }
@@ -305,7 +331,7 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.gson)
 
-    // Play Asset Delivery: plugin packs are fast-follow, so they are not in
+    // Play Asset Delivery: plugin packs are on-demand, so they are not in
     // the base AssetManager at install.
     implementation("com.google.android.play:asset-delivery:2.2.2")
 

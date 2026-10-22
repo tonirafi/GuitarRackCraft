@@ -515,16 +515,33 @@ class RackViewModel(application: Application) : AndroidViewModel(application) {
 
     fun loadPreset(ctx: Context, name: String) {
         viewModelScope.launch {
+            _presetMessage.value = null
             val ok = loadPresetAwait(ctx, name)
             if (ok) {
                 _presetMessage.value = "Preset '$name' loaded"
-            } else {
+            } else if (_presetMessage.value == null) {
                 _presetMessage.value = "Failed to load preset (plugin count mismatch?)"
             }
         }
     }
 
     suspend fun loadPresetAwait(ctx: Context, name: String): Boolean {
+        val json = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            presetManager.readPresetJson(ctx, name)
+        } ?: return false
+        when (val packs = com.varcain.guitarrackcraft.ui.loading.PluginPackGate.ensureForUris(
+            ctx, com.varcain.guitarrackcraft.ui.loading.PluginPackGate.urisInPreset(json)
+        )) {
+            is com.varcain.guitarrackcraft.ui.loading.PluginPackGate.Result.Cancelled -> {
+                _presetMessage.value = "Unduhan paket dibatalkan."
+                return false
+            }
+            is com.varcain.guitarrackcraft.ui.loading.PluginPackGate.Result.Failed -> {
+                _presetMessage.value = packs.message
+                return false
+            }
+            is com.varcain.guitarrackcraft.ui.loading.PluginPackGate.Result.Ready -> Unit
+        }
         val engine = NativeEngine.getInstance()
         return try {
             withBlockingOperation("Loading preset") {
@@ -551,6 +568,21 @@ class RackViewModel(application: Application) : AndroidViewModel(application) {
 
     fun loadRecordingPreset(json: String) {
         viewModelScope.launch {
+            _presetMessage.value = null
+            when (val packs = com.varcain.guitarrackcraft.ui.loading.PluginPackGate.ensureForUris(
+                getApplication(),
+                com.varcain.guitarrackcraft.ui.loading.PluginPackGate.urisInPreset(json)
+            )) {
+                is com.varcain.guitarrackcraft.ui.loading.PluginPackGate.Result.Cancelled -> {
+                    _presetMessage.value = "Unduhan paket dibatalkan."
+                    return@launch
+                }
+                is com.varcain.guitarrackcraft.ui.loading.PluginPackGate.Result.Failed -> {
+                    _presetMessage.value = packs.message
+                    return@launch
+                }
+                is com.varcain.guitarrackcraft.ui.loading.PluginPackGate.Result.Ready -> Unit
+            }
             val engine = NativeEngine.getInstance()
             val ok = try {
                 withBlockingOperation("Loading preset") {

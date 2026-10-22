@@ -21,11 +21,23 @@ plugins {
     id("com.android.asset-pack")
 }
 
+// Pedal artwork stays out of the Play install. It is fetched with this pack.
+val stagePackImages = tasks.register<Copy>("stagePackImages") {
+    from(rootProject.file("app/src/main/assets")) {
+        include("lv2/GxPlugins.lv2/**/*.png")
+        include("lv2/modgui_shared_resources/**/*.png")
+    }
+    into(layout.projectDirectory.dir("src/main/assets"))
+}
+
 assetPack {
     packName.set("gxplugins_pack")
     dynamicDelivery {
-        // Fast-follow, not install-time: install-time packs are split APKs
-        // with no <uses-sdk>, and Play reads their target SDK as 1.
-        deliveryType.set("fast-follow")
+        // On-demand, not install-time or fast-follow. Install-time packs are
+        // split APKs with no <uses-sdk>, and Play reads their target SDK as 1.
+        // Fast-follow starts the large download as soon as the app is installed.
+        // On-demand waits until the app calls fetch(), which is when an effect
+        // from this pack is used.
+        deliveryType.set("on-demand")
     }
 }

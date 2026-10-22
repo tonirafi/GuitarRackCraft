@@ -47,6 +47,7 @@ import com.varcain.guitarrackcraft.engine.EffectKeepAliveService
 import com.varcain.guitarrackcraft.engine.EngineInitHelper
 import com.varcain.guitarrackcraft.engine.PluginAssetExtractor
 import com.varcain.guitarrackcraft.ui.loading.PluginExtractScreen
+import com.varcain.guitarrackcraft.ui.loading.PluginPackDialog
 import com.varcain.guitarrackcraft.ui.navigation.AppNavigation
 import com.varcain.guitarrackcraft.ui.theme.GuitarRackCraftTheme
 import com.varcain.guitarrackcraft.ui.tone3000.Tone3000CallbackHandler
@@ -159,6 +160,7 @@ class MainActivity : ComponentActivity() {
                             onRetry = { lifecycleScope.launch { startEnginePrepare() } }
                         )
                     }
+                    PluginPackDialog()
                 }
             }
         }
@@ -184,11 +186,15 @@ class MainActivity : ComponentActivity() {
                 val stampValue = "${BuildConfig.VERSION_CODE}:${fileList.size}"
                 if (stamp.isFile && stamp.readText() == stampValue && (lv2Dir.list()?.size ?: 0) > 1) {
                     android.util.Log.d("MainActivity", "LV2 assets already extracted ($stampValue)")
+                    if (BuildConfig.USE_ASSET_PACKS) {
+                        PluginAssetExtractor.copyInstalledPackImages(applicationContext)
+                    }
                     return
                 }
                 initStatus = "Menyalin definisi plugin"
                 android.util.Log.d("MainActivity", "Extracting ${fileList.size} LV2 asset files from lv2_files.txt")
                 for (relPath in fileList) {
+                    if (BuildConfig.USE_ASSET_PACKS && relPath.endsWith(".png")) continue
                     val outputFile = File(lv2Dir, relPath)
                     if (outputFile.isFile && outputFile.length() > 0L) continue
                     outputFile.parentFile?.mkdirs()
@@ -203,6 +209,9 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 stamp.writeText(stampValue)
+                if (BuildConfig.USE_ASSET_PACKS) {
+                    PluginAssetExtractor.copyInstalledPackImages(applicationContext)
+                }
             } else {
                 // Fallback: enumerate via assets.list() (full variant / no manifest)
                 val bundleNames = assets.list("lv2")?.toList() ?: emptyList()

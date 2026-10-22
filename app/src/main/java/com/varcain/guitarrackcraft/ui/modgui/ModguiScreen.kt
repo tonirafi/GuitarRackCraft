@@ -446,8 +446,13 @@ private fun buildAssetLoader(
                 }
                 // Fall back to shared modgui resources (boxy pedal themes, etc.)
                 val assetPath = "lv2/modgui_shared_resources/$relativePath"
+                val sharedFile = java.io.File(context.filesDir, assetPath)
                 val sharedResult = try {
-                    val bytes = context.assets.open(assetPath).use { it.readBytes() }
+                    val bytes = if (sharedFile.isFile) {
+                        sharedFile.readBytes()
+                    } else {
+                        context.assets.open(assetPath).use { it.readBytes() }
+                    }
                     val ext = assetPath.substringAfterLast('.', "").lowercase()
                     val mimeType = when (ext) {
                         "png" -> "image/png"
